@@ -181,9 +181,20 @@ class DrawingManager {
     
     finishDragging() {
         this.isDragging = false;
-        if (this.selectedStroke) {
-            this.selectedStroke.selected = false;
+        
+        // If we were dragging a group, keep all strokes in the group selected
+        if (this.draggedStrokes.length > 1) {
+            // Keep all dragged strokes selected
+            this.draggedStrokes.forEach(stroke => {
+                stroke.selected = true;
+            });
+            // Update selectedStrokes to include the dragged group
+            this.selectedStrokes = [...this.draggedStrokes];
+        } else if (this.selectedStroke) {
+            // Single stroke - keep it selected
+            this.selectedStroke.selected = true;
         }
+        
         this.selectedStroke = null;
         this.draggedStrokes = [];
         this.dragOffset = { x: 0, y: 0 };
@@ -439,7 +450,8 @@ class DrawingManager {
     clearCanvas() {
         this.strokes = [];
         this.currentStroke = null;
-        this.canvasManager.clearCanvas();
+        // Clear and redraw with dot pattern
+        this.redraw();
         // Save state for undo
         this.undoManager.save();
     }
