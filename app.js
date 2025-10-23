@@ -130,24 +130,29 @@ class DrawingPad {
     
     startDragging(point) {
         this.isDragging = true;
-        const strokeBounds = this.getStrokeBounds(this.selectedStroke);
         this.dragOffset = {
-            x: point.x - strokeBounds.centerX,
-            y: point.y - strokeBounds.centerY
+            x: point.x,
+            y: point.y
         };
     }
     
     continueDragging(point) {
         if (!this.selectedStroke) return;
         
-        const deltaX = point.x - this.dragOffset.x - this.getStrokeBounds(this.selectedStroke).centerX;
-        const deltaY = point.y - this.dragOffset.y - this.getStrokeBounds(this.selectedStroke).centerY;
+        const deltaX = point.x - this.dragOffset.x;
+        const deltaY = point.y - this.dragOffset.y;
         
         // Translate all points in the stroke
         this.selectedStroke.points = this.selectedStroke.points.map(p => ({
             x: p.x + deltaX,
             y: p.y + deltaY
         }));
+        
+        // Update the drag offset for the next frame
+        this.dragOffset = {
+            x: point.x,
+            y: point.y
+        };
         
         this.redraw();
     }
