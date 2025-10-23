@@ -48,3 +48,32 @@ body {
     background: #004499;
     transform: scale(0.95);
 }
+
+#debugInfo {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.4;
+    z-index: 1000;
+    min-width: 200px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+#debugInfo div {
+    margin-bottom: 5px;
+}
+
+#debugInfo div:last-child {
+    margin-bottom: 0;
+}
+
+#debugInfo span {
+    color: #00FF00;
+    font-weight: bold;
+}

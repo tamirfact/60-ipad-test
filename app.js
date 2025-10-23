@@ -4,6 +4,13 @@ class DrawingPad {
         this.ctx = this.canvas.getContext('2d');
         this.clearButton = document.getElementById('clearButton');
         
+        // Debug display elements
+        this.penX = document.getElementById('penX');
+        this.penY = document.getElementById('penY');
+        this.penPressure = document.getElementById('penPressure');
+        this.penTiltX = document.getElementById('penTiltX');
+        this.penTiltY = document.getElementById('penTiltY');
+        
         this.strokes = [];
         this.currentStroke = null;
         this.isDrawing = false;
@@ -48,6 +55,9 @@ class DrawingPad {
         this.canvas.addEventListener('pointermove', (e) => this.handlePointerMove(e));
         this.canvas.addEventListener('pointerup', (e) => this.handlePointerUp(e));
         this.canvas.addEventListener('pointercancel', (e) => this.handlePointerUp(e));
+        
+        // Debug: Update display on any pointer movement
+        this.canvas.addEventListener('pointermove', (e) => this.updateDebugDisplay(e));
         
         // Prevent default touch behaviors
         this.canvas.addEventListener('touchstart', (e) => e.preventDefault());
@@ -283,6 +293,16 @@ class DrawingPad {
             x: event.clientX - rect.left,
             y: event.clientY - rect.top
         };
+    }
+    
+    updateDebugDisplay(event) {
+        const point = this.getPointFromEvent(event);
+        
+        this.penX.textContent = Math.round(point.x);
+        this.penY.textContent = Math.round(point.y);
+        this.penPressure.textContent = (event.pressure || 0).toFixed(2);
+        this.penTiltX.textContent = (event.tiltX || 0).toFixed(1);
+        this.penTiltY.textContent = (event.tiltY || 0).toFixed(1);
     }
     
     clearCanvas() {
