@@ -12,12 +12,13 @@ class DrawingPad {
         this.penTiltY = document.getElementById('penTiltY');
         
         this.strokes = [];
-        this.undoStack = []; // Store previous states for undo
+        this.undoManager = new UndoManager();
         this.currentStroke = null;
         this.isDrawing = false;
         this.isDragging = false;
         this.dragOffset = { x: 0, y: 0 };
         this.selectedStroke = null;
+        this.draggedStrokes = []; // Strokes being dragged together
         
         this.setupCanvas();
         this.setupEventListeners();
@@ -136,8 +137,20 @@ class DrawingPad {
     
     finishDrawing() {
         if (this.currentStroke) {
-            // Save state before adding new stroke
-            this.saveState();
+            // Create undo/redo action for adding stroke
+            const strokeToAdd = this.currentStroke;
+            const action = {
+                execute: () => {
+                    this.strokes.push(strokeToAdd);
+                    this.redraw();
+                },
+                undo: () => {
+                    this.strokes.pop();
+                    this.redraw();
+                }
+            };
+            
+            this.undoManager.add(action);
             this.strokes.push(this.currentStroke);
             this.currentStroke = null;
         }
@@ -150,6 +163,9 @@ class DrawingPad {
             x: point.x,
             y: point.y
         };
+        
+        // Find all strokes within proximity of the selected stroke
+        this.draggedStrokes = this.findNearbyStrokes(this.selectedStroke, 50); // 50px tolerance
     }
     
     continueDragging(point) {
@@ -158,11 +174,13 @@ class DrawingPad {
         const deltaX = point.x - this.dragOffset.x;
         const deltaY = point.y - this.dragOffset.y;
         
-        // Translate all points in the stroke
-        this.selectedStroke.points = this.selectedStroke.points.map(p => ({
-            x: p.x + deltaX,
-            y: p.y + deltaY
-        }));
+        // Translate all points in all dragged strokes
+        this.draggedStrokes.forEach(stroke => {
+            stroke.points = stroke.points.map(p => ({
+                x: p.x + deltaX,
+                y: p.y + deltaY
+            }));
+        });
         
         // Update the drag offset for the next frame
         this.dragOffset = {
@@ -179,6 +197,7 @@ class DrawingPad {
             this.selectedStroke.selected = false;
         }
         this.selectedStroke = null;
+        this.draggedStrokes = [];
         this.dragOffset = { x: 0, y: 0 };
         this.redraw();
     }
@@ -267,6 +286,42 @@ class DrawingPad {
         return null;
     }
     
+    findNearbyStrokes(targetStroke, tolerance) {
+        const nearbyStrokes = [targetStroke]; // Always include the target stroke
+        const targetBounds = this.getStrokeBounds(targetStroke);
+        
+        this.strokes.forEach(stroke => {
+            if (stroke === targetStroke) return; // Skip the target stroke itself
+            
+            const strokeBounds = this.getStrokeBounds(stroke);
+            
+            // Calculate distance between stroke centers
+            const distance = Math.sqrt(
+                Math.pow(targetBounds.centerX - strokeBounds.centerX, 2) + 
+                Math.pow(targetBounds.centerY - strokeBounds.centerY, 2)
+            );
+            
+            // Also check if any points are within tolerance
+            let pointDistance = Infinity;
+            targetStroke.points.forEach(targetPoint => {
+                stroke.points.forEach(strokePoint => {
+                    const dist = Math.sqrt(
+                        Math.pow(targetPoint.x - strokePoint.x, 2) + 
+                        Math.pow(targetPoint.y - strokePoint.y, 2)
+                    );
+                    pointDistance = Math.min(pointDistance, dist);
+                });
+            });
+            
+            // Add stroke if it's within tolerance (either by center distance or point distance)
+            if (distance <= tolerance || pointDistance <= tolerance) {
+                nearbyStrokes.push(stroke);
+            }
+        });
+        
+        return nearbyStrokes;
+    }
+    
     getStrokeBounds(stroke) {
         if (!stroke.points.length) return { centerX: 0, centerY: 0 };
         
@@ -310,30 +365,25 @@ class DrawingPad {
         // Check for two-finger tap (2 touches that ended simultaneously)
         if (e.changedTouches.length === 2) {
             e.preventDefault();
-            this.undo();
-        }
-    }
-    
-    saveState() {
-        // Save current state to undo stack
-        this.undoStack.push(JSON.parse(JSON.stringify(this.strokes)));
-        
-        // Limit undo stack size to prevent memory issues
-        if (this.undoStack.length > 20) {
-            this.undoStack.shift();
-        }
-    }
-    
-    undo() {
-        if (this.undoStack.length > 0) {
-            // Restore previous state
-            this.strokes = this.undoStack.pop();
-            this.redraw();
+            this.undoManager.undo();
         }
     }
     
     clearCanvas() {
-        this.saveState(); // Save current state before clearing
+        // Create undo/redo action for clearing canvas
+        const currentStrokes = [...this.strokes];
+        const action = {
+            execute: () => {
+                this.strokes = [];
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            },
+            undo: () => {
+                this.strokes = [...currentStrokes];
+                this.redraw();
+            }
+        };
+        
+        this.undoManager.add(action);
         this.strokes = [];
         this.currentStroke = null;
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
