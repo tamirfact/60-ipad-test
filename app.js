@@ -211,7 +211,6 @@ class DrawingPad {
             const prevPoint = points[i - 1];
             const currentPoint = points[i];
             const pressure = pressures[i];
-            const tilt = tilts[i];
             
             // Calculate control point for smooth curve
             const cp1x = prevPoint.x + (currentPoint.x - prevPoint.x) * 0.5;
@@ -219,16 +218,8 @@ class DrawingPad {
             
             this.ctx.quadraticCurveTo(cp1x, cp1y, currentPoint.x, currentPoint.y);
             
-            // Set line width based on pressure (preserve original width)
+            // Set line width based on pressure
             this.ctx.lineWidth = Math.max(1, pressure * 20);
-            
-            // Apply tilt effect by rotating the context
-            if (tilt.x !== 0 || tilt.y !== 0) {
-                const angle = Math.atan2(tilt.y, tilt.x) * 0.1;
-                this.ctx.translate(currentPoint.x, currentPoint.y);
-                this.ctx.rotate(angle);
-                this.ctx.translate(-currentPoint.x, -currentPoint.y);
-            }
         }
         
         this.ctx.stroke();
