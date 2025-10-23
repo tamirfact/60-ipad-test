@@ -5,7 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>iPad Drawing Pad Demo</title>
     <link rel="stylesheet" href="styles.css">
-    <script src="https://cdn.jsdelivr.net/npm/simple-undo@1.0.0/simple-undo.min.js"></script>
+    <script src="simpleUndo.js"></script>
+
+    <script>
+        // Debug: Check what's loaded
+        console.log('After loading simple-undo:');
+        console.log('SimpleUndo defined:', typeof SimpleUndo !== 'undefined');
+        console.log('Available globals:', Object.keys(window).filter(key => key.includes('Undo') || key.includes('undo')));
+    </script>
+    <script src="canvas.js"></script>
+    <script src="draw.js"></script>
+    <script src="app.js"></script>
 </head>
 <body>
     <canvas id="drawingCanvas"></canvas>
@@ -17,8 +27,5 @@
         <div>Tilt X: <span id="penTiltX">0</span></div>
         <div>Tilt Y: <span id="penTiltY">0</span></div>
     </div>
-    <script src="canvas.js"></script>
-    <script src="draw.js"></script>
-    <script src="app.js"></script>
 </body>
 </html>

@@ -12,7 +12,19 @@ class DrawingManager {
         this.penTiltY = document.getElementById('penTiltY');
         
         this.strokes = [];
-        this.undoManager = new UndoManager();
+        
+        // Debug: Check if SimpleUndo is available
+        if (typeof SimpleUndo === 'undefined') {
+            console.error('SimpleUndo is not defined. Check if simple-undo library loaded correctly.');
+            throw new Error('SimpleUndo not available');
+        }
+        
+        this.undoManager = new SimpleUndo({
+            provider: (done) => {
+                done(JSON.parse(JSON.stringify(this.strokes)));
+            },
+            maxLength: 20
+        });
         this.currentStroke = null;
         this.isDrawing = false;
         this.isDragging = false;
@@ -123,22 +135,10 @@ class DrawingManager {
     
     finishDrawing() {
         if (this.currentStroke) {
-            // Create undo/redo action for adding stroke
-            const strokeToAdd = this.currentStroke;
-            const action = {
-                execute: () => {
-                    this.strokes.push(strokeToAdd);
-                    this.redraw();
-                },
-                undo: () => {
-                    this.strokes.pop();
-                    this.redraw();
-                }
-            };
-            
-            this.undoManager.add(action);
             this.strokes.push(this.currentStroke);
             this.currentStroke = null;
+            // Save state for undo
+            this.undoManager.save();
         }
         this.isDrawing = false;
     }
@@ -437,22 +437,10 @@ class DrawingManager {
     }
     
     clearCanvas() {
-        // Create undo/redo action for clearing canvas
-        const currentStrokes = [...this.strokes];
-        const action = {
-            execute: () => {
-                this.strokes = [];
-                this.canvasManager.clearCanvas();
-            },
-            undo: () => {
-                this.strokes = [...currentStrokes];
-                this.redraw();
-            }
-        };
-        
-        this.undoManager.add(action);
         this.strokes = [];
         this.currentStroke = null;
         this.canvasManager.clearCanvas();
+        // Save state for undo
+        this.undoManager.save();
     }
 }
