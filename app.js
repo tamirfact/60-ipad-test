@@ -12,6 +12,7 @@ class DrawingPad {
         this.penTiltY = document.getElementById('penTiltY');
         
         this.strokes = [];
+        this.undoStack = []; // Store previous states for undo
         this.currentStroke = null;
         this.isDrawing = false;
         this.isDragging = false;
@@ -63,6 +64,9 @@ class DrawingPad {
         this.canvas.addEventListener('touchstart', (e) => e.preventDefault());
         this.canvas.addEventListener('touchmove', (e) => e.preventDefault());
         this.canvas.addEventListener('touchend', (e) => e.preventDefault());
+        
+        // Two-finger tap for undo
+        this.canvas.addEventListener('touchend', (e) => this.handleTouchEnd(e));
     }
     
     handlePointerDown(e) {
@@ -132,6 +136,8 @@ class DrawingPad {
     
     finishDrawing() {
         if (this.currentStroke) {
+            // Save state before adding new stroke
+            this.saveState();
             this.strokes.push(this.currentStroke);
             this.currentStroke = null;
         }
@@ -305,7 +311,34 @@ class DrawingPad {
         this.penTiltY.textContent = (event.tiltY || 0).toFixed(1);
     }
     
+    handleTouchEnd(e) {
+        // Check for two-finger tap (2 touches that ended simultaneously)
+        if (e.changedTouches.length === 2) {
+            e.preventDefault();
+            this.undo();
+        }
+    }
+    
+    saveState() {
+        // Save current state to undo stack
+        this.undoStack.push(JSON.parse(JSON.stringify(this.strokes)));
+        
+        // Limit undo stack size to prevent memory issues
+        if (this.undoStack.length > 20) {
+            this.undoStack.shift();
+        }
+    }
+    
+    undo() {
+        if (this.undoStack.length > 0) {
+            // Restore previous state
+            this.strokes = this.undoStack.pop();
+            this.redraw();
+        }
+    }
+    
     clearCanvas() {
+        this.saveState(); // Save current state before clearing
         this.strokes = [];
         this.currentStroke = null;
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
