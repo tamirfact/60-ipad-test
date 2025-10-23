@@ -58,22 +58,32 @@ class CanvasManager {
         }
     }
     
-    showToast(message) {
+    showToast(message, imageData = null) {
         const toast = document.getElementById('toast');
         const toastMessage = document.getElementById('toastMessage');
+        const toastImage = document.getElementById('toastImage');
         
         // Update message
         toastMessage.textContent = message;
+        
+        // Handle image
+        if (imageData) {
+            toastImage.src = imageData;
+            toastImage.style.display = 'block';
+        } else {
+            toastImage.style.display = 'none';
+        }
         
         // Show toast
         toast.classList.remove('toast-hidden');
         toast.classList.add('toast-visible');
         
-        // Hide after 1.3 seconds
+        // Hide after 3 seconds (longer for images)
+        const hideDelay = imageData ? 3000 : 1300;
         setTimeout(() => {
             toast.classList.remove('toast-visible');
             toast.classList.add('toast-hidden');
-        }, 1300);
+        }, hideDelay);
     }
     
     getPointFromEvent(event) {

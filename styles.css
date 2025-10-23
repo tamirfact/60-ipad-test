@@ -24,31 +24,6 @@ body {
     display: block;
 }
 
-#clearButton {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    padding: 12px 24px;
-    background: #007AFF;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-size: 16px;
-    font-weight: 600;
-    cursor: pointer;
-    z-index: 1000;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    transition: background-color 0.2s ease;
-}
-
-#clearButton:hover {
-    background: #0056CC;
-}
-
-#clearButton:active {
-    background: #004499;
-    transform: scale(0.95);
-}
 
 #debugInfo {
     position: fixed;
@@ -79,6 +54,28 @@ body {
     font-weight: bold;
 }
 
+#debugInfo #clearButton {
+    margin-top: 10px;
+    padding: 8px 16px;
+    background: #FF3B30;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+#debugInfo #clearButton:hover {
+    background: #D70015;
+}
+
+#debugInfo #clearButton:active {
+    background: #B71C1C;
+    transform: scale(0.95);
+}
+
 #toast {
     position: fixed;
     bottom: 50px;
@@ -86,13 +83,25 @@ body {
     transform: translateX(-50%);
     background: rgba(0, 0, 0, 0.8);
     color: white;
-    padding: 12px 24px;
+    padding: 15px;
     border-radius: 8px;
     font-size: 16px;
     font-weight: 600;
     z-index: 2000;
     transition: opacity 0.3s ease, transform 0.3s ease;
     pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    max-width: 300px;
+}
+
+.toast-image {
+    max-width: 200px;
+    max-height: 150px;
+    border-radius: 4px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
 }
 
 .toast-hidden {
@@ -103,4 +112,61 @@ body {
 .toast-visible {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
+}
+
+#dropZone {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    width: 80px;
+    height: 80px;
+    background: linear-gradient(135deg, #FF69B4, #FF1493);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1500;
+    box-shadow: 0 4px 12px rgba(255, 20, 147, 0.3);
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.drop-zone-hidden {
+    display: none;
+}
+
+.drop-zone-visible {
+    display: flex;
+}
+
+#dropZone:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 16px rgba(255, 20, 147, 0.4);
+}
+
+#dropZone.drag-over {
+    transform: scale(1.2);
+    background: linear-gradient(135deg, #00FF7F, #00CED1);
+    box-shadow: 0 8px 20px rgba(0, 255, 127, 0.4);
+}
+
+.drop-zone-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    text-align: center;
+}
+
+.drop-zone-icon {
+    font-size: 24px;
+    margin-bottom: 2px;
+}
+
+.drop-zone-text {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }

@@ -35,6 +35,16 @@ class DrawingManager {
         this.lassoPoints = []; // Points for lasso selection
         this.selectedStrokes = []; // Strokes selected by lasso
         
+        // Drop zone elements
+        this.dropZone = document.getElementById('dropZone');
+        this.isOverDropZone = false;
+        
+        // Actionable object hover state
+        this.hoveredSmartObject = null;
+
+        // AI generator
+        this.aiGenerator = new AIGenerator();
+
         this.setupEventListeners();
     }
     
@@ -49,7 +59,12 @@ class DrawingManager {
         this.canvas.addEventListener('pointermove', (e) => this.updateDebugDisplay(e));
         
         // Set up canvas manager undo callback
-        this.canvasManager.onUndo = () => this.undoManager.undo();
+        this.canvasManager.onUndo = () => {
+            this.undoManager.undo((restoredStrokes) => {
+                this.strokes = restoredStrokes || [];
+                this.redraw();
+            });
+        };
     }
     
     handlePointerDown(e) {
@@ -77,8 +92,9 @@ class DrawingManager {
                 this.redraw();
                 this.startDragging(point);
             } else {
+                // Clear all selections if clicking empty space
+                this.clearAllSelections();
                 // Start lasso selection if no stroke is hit
-                this.clearLassoSelection();
                 this.startLassoSelection(point);
             }
         }
@@ -154,6 +170,9 @@ class DrawingManager {
         if (this.draggedStrokes.length === 0) {
             this.draggedStrokes = this.findNearbyStrokes(this.selectedStroke, 50); // 50px tolerance
         }
+        
+        // Show drop zone when dragging
+        this.showDropZone();
     }
     
     continueDragging(point) {
@@ -164,11 +183,24 @@ class DrawingManager {
         
         // Translate all points in all dragged strokes
         this.draggedStrokes.forEach(stroke => {
-            stroke.points = stroke.points.map(p => ({
-                x: p.x + deltaX,
-                y: p.y + deltaY
-            }));
+            if (stroke.type === 'smart-object') {
+                // Move smart object position
+                stroke.position.x += deltaX;
+                stroke.position.y += deltaY;
+            } else if (stroke.points) {
+                // Move regular stroke points
+                stroke.points = stroke.points.map(p => ({
+                    x: p.x + deltaX,
+                    y: p.y + deltaY
+                }));
+            }
         });
+        
+        // Check if dragging over drop zone
+        this.checkDropZoneHover(point);
+        
+        // Check if dragging over actionable smart object
+        this.updateActionableObjectHover(point);
         
         // Update the drag offset for the next frame
         this.dragOffset = {
@@ -181,7 +213,26 @@ class DrawingManager {
     
     finishDragging() {
         this.isDragging = false;
-        
+
+        // Check if dropped over drop zone
+        if (this.isOverDropZone) {
+            this.handleDropZoneDrop();
+            this.hideDropZone();
+            return;
+        }
+
+        // Check if dropped over actionable smart object
+        if (this.hoveredSmartObject && this.hoveredSmartObject.action) {
+            this.executeSmartObjectAction(this.hoveredSmartObject, this.draggedStrokes);
+            this.hoveredSmartObject = null;
+            this.selectedStroke = null;
+            this.draggedStrokes = [];
+            this.dragOffset = { x: 0, y: 0 };
+            this.hideDropZone();
+            this.redraw();
+            return;
+        }
+
         // If we were dragging a group, keep all strokes in the group selected
         if (this.draggedStrokes.length > 1) {
             // Keep all dragged strokes selected
@@ -194,10 +245,11 @@ class DrawingManager {
             // Single stroke - keep it selected
             this.selectedStroke.selected = true;
         }
-        
+
         this.selectedStroke = null;
         this.draggedStrokes = [];
         this.dragOffset = { x: 0, y: 0 };
+        this.hideDropZone();
         this.redraw();
     }
     
@@ -207,6 +259,17 @@ class DrawingManager {
             stroke.selected = false;
         });
         this.selectedStrokes = [];
+    }
+    
+    clearAllSelections() {
+        // Clear all stroke selections
+        this.strokes.forEach(stroke => {
+            stroke.selected = false;
+        });
+        this.selectedStrokes = [];
+        this.selectedStroke = null;
+        this.draggedStrokes = [];
+        this.redraw();
     }
     
     startLassoSelection(point) {
@@ -313,6 +376,52 @@ class DrawingManager {
         this.ctx.restore();
     }
     
+    drawSmartObject(smartObject) {
+        this.ctx.save();
+
+        // Set up large font for emoji
+        this.ctx.font = '48px Arial, sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+
+        // Check if this is the hovered actionable object
+        const isHovered = this.hoveredSmartObject === smartObject;
+        const scale = isHovered ? 1.1 : 1.0;
+        const radius = 40 * scale;
+
+        // Apply scaling transform
+        this.ctx.translate(smartObject.position.x, smartObject.position.y);
+        this.ctx.scale(scale, scale);
+        this.ctx.translate(-smartObject.position.x, -smartObject.position.y);
+
+        // Background circle for visibility
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        
+        // Different border color for actionable objects
+        if (smartObject.action) {
+            this.ctx.strokeStyle = smartObject.selected ? '#007AFF' : '#FF6B35'; // Orange for actionable
+        } else {
+            this.ctx.strokeStyle = smartObject.selected ? '#007AFF' : '#CCCCCC';
+        }
+        this.ctx.lineWidth = 3;
+
+        // Draw background circle with more padding
+        this.ctx.beginPath();
+        this.ctx.arc(smartObject.position.x, smartObject.position.y, 40, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
+
+        // Draw emoji
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillText(
+            smartObject.emoji,
+            smartObject.position.x,
+            smartObject.position.y
+        );
+
+        this.ctx.restore();
+    }
+    
     redraw() {
         this.canvasManager.redraw(() => {
             // Draw lasso selection if active
@@ -320,9 +429,11 @@ class DrawingManager {
                 this.drawLassoSelection();
             }
             
-            // Redraw all strokes
+            // Redraw all strokes and smart objects
             this.strokes.forEach(stroke => {
-                if (stroke.points.length > 1) {
+                if (stroke.type === 'smart-object') {
+                    this.drawSmartObject(stroke);
+                } else if (stroke.points && stroke.points.length > 1) {
                     this.drawStrokeSegment(stroke);
                 }
             });
@@ -334,14 +445,29 @@ class DrawingManager {
         
         for (let i = this.strokes.length - 1; i >= 0; i--) {
             const stroke = this.strokes[i];
-            for (let j = 0; j < stroke.points.length; j++) {
-                const strokePoint = stroke.points[j];
+            
+            // Check smart objects (emoji)
+            if (stroke.type === 'smart-object') {
+                const radius = 40;
                 const distance = Math.sqrt(
-                    Math.pow(point.x - strokePoint.x, 2) + 
-                    Math.pow(point.y - strokePoint.y, 2)
+                    Math.pow(point.x - stroke.position.x, 2) +
+                    Math.pow(point.y - stroke.position.y, 2)
                 );
-                if (distance <= tolerance) {
+
+                if (distance <= radius) {
                     return stroke;
+                }
+            } else {
+                // Check regular strokes
+                for (let j = 0; j < stroke.points.length; j++) {
+                    const strokePoint = stroke.points[j];
+                    const distance = Math.sqrt(
+                        Math.pow(point.x - strokePoint.x, 2) + 
+                        Math.pow(point.y - strokePoint.y, 2)
+                    );
+                    if (distance <= tolerance) {
+                        return stroke;
+                    }
                 }
             }
         }
@@ -363,17 +489,19 @@ class DrawingManager {
                 Math.pow(targetBounds.centerY - strokeBounds.centerY, 2)
             );
             
-            // Also check if any points are within tolerance
+            // Also check if any points are within tolerance (only for regular strokes)
             let pointDistance = Infinity;
-            targetStroke.points.forEach(targetPoint => {
-                stroke.points.forEach(strokePoint => {
-                    const dist = Math.sqrt(
-                        Math.pow(targetPoint.x - strokePoint.x, 2) + 
-                        Math.pow(targetPoint.y - strokePoint.y, 2)
-                    );
-                    pointDistance = Math.min(pointDistance, dist);
+            if (targetStroke.points && stroke.points) {
+                targetStroke.points.forEach(targetPoint => {
+                    stroke.points.forEach(strokePoint => {
+                        const dist = Math.sqrt(
+                            Math.pow(targetPoint.x - strokePoint.x, 2) + 
+                            Math.pow(targetPoint.y - strokePoint.y, 2)
+                        );
+                        pointDistance = Math.min(pointDistance, dist);
+                    });
                 });
-            });
+            }
             
             // Add stroke if it's within tolerance (either by center distance or point distance)
             if (distance <= tolerance || pointDistance <= tolerance) {
@@ -391,11 +519,19 @@ class DrawingManager {
             // Check if any point of the stroke is inside the lasso polygon
             let isInside = false;
             
-            stroke.points.forEach(point => {
-                if (this.isPointInPolygon(point, lassoPoints)) {
+            if (stroke.type === 'smart-object') {
+                // For smart objects, check if center is in lasso
+                if (this.isPointInPolygon(stroke.position, lassoPoints)) {
                     isInside = true;
                 }
-            });
+            } else if (stroke.points) {
+                // For regular strokes, check each point
+                stroke.points.forEach(point => {
+                    if (this.isPointInPolygon(point, lassoPoints)) {
+                        isInside = true;
+                    }
+                });
+            }
             
             if (isInside) {
                 selectedStrokes.push(stroke);
@@ -417,6 +553,19 @@ class DrawingManager {
     }
     
     getStrokeBounds(stroke) {
+        // Handle smart objects (emoji)
+        if (stroke.type === 'smart-object') {
+            const radius = 40;
+            return {
+                centerX: stroke.position.x,
+                centerY: stroke.position.y,
+                minX: stroke.position.x - radius,
+                maxX: stroke.position.x + radius,
+                minY: stroke.position.y - radius,
+                maxY: stroke.position.y + radius
+            };
+        }
+        
         if (!stroke.points.length) return { centerX: 0, centerY: 0 };
         
         let minX = stroke.points[0].x;
@@ -433,7 +582,8 @@ class DrawingManager {
         
         return {
             centerX: (minX + maxX) / 2,
-            centerY: (minY + maxY) / 2
+            centerY: (minY + maxY) / 2,
+            minX, maxX, minY, maxY
         };
     }
     
@@ -455,4 +605,104 @@ class DrawingManager {
         // Save state for undo
         this.undoManager.save();
     }
+    
+    showDropZone() {
+        this.dropZone.classList.remove('drop-zone-hidden');
+        this.dropZone.classList.add('drop-zone-visible');
+    }
+    
+    hideDropZone() {
+        this.dropZone.classList.remove('drop-zone-visible');
+        this.dropZone.classList.add('drop-zone-hidden');
+        this.dropZone.classList.remove('drag-over');
+        this.isOverDropZone = false;
+    }
+    
+    checkDropZoneHover(point) {
+        const dropZoneRect = this.dropZone.getBoundingClientRect();
+        const canvasRect = this.canvas.getBoundingClientRect();
+        
+        // Convert canvas coordinates to screen coordinates
+        const screenX = point.x + canvasRect.left;
+        const screenY = point.y + canvasRect.top;
+        
+        // Check if point is within drop zone bounds
+        const isOver = screenX >= dropZoneRect.left && 
+                      screenX <= dropZoneRect.right && 
+                      screenY >= dropZoneRect.top && 
+                      screenY <= dropZoneRect.bottom;
+        
+        if (isOver && !this.isOverDropZone) {
+            this.dropZone.classList.add('drag-over');
+            this.isOverDropZone = true;
+        } else if (!isOver && this.isOverDropZone) {
+            this.dropZone.classList.remove('drag-over');
+            this.isOverDropZone = false;
+        }
+    }
+    
+    async handleDropZoneDrop() {
+        await this.aiGenerator.processDrawing(this, this.draggedStrokes);
+    }
+    
+    findSmartObjectAtPoint(point) {
+        for (let i = this.strokes.length - 1; i >= 0; i--) {
+            const stroke = this.strokes[i];
+            
+            if (stroke.type === 'smart-object') {
+                const radius = 40;
+                const distance = Math.sqrt(
+                    Math.pow(point.x - stroke.position.x, 2) +
+                    Math.pow(point.y - stroke.position.y, 2)
+                );
+
+                if (distance <= radius) {
+                    return stroke;
+                }
+            }
+        }
+        return null;
+    }
+    
+    updateActionableObjectHover(point) {
+        const smartObject = this.findSmartObjectAtPoint(point);
+        
+        if (smartObject && smartObject.action) {
+            // Hovering over actionable smart object
+            if (this.hoveredSmartObject !== smartObject) {
+                this.hoveredSmartObject = smartObject;
+                this.redraw();
+            }
+        } else {
+            // Not hovering over actionable smart object
+            if (this.hoveredSmartObject) {
+                this.hoveredSmartObject = null;
+                this.redraw();
+            }
+        }
+    }
+    
+    executeSmartObjectAction(smartObject, draggedStrokes) {
+        if (!smartObject.action) return;
+        
+        const strokeIds = draggedStrokes.map(s => this.strokes.indexOf(s));
+        
+        switch(smartObject.action) {
+            case 'delete':
+                CanvasActions.delete(this, strokeIds);
+                this.canvasManager.showToast('Deleted strokes');
+                break;
+            case 'reflect':
+                CanvasActions.reflect(this, strokeIds);
+                this.canvasManager.showToast('Reflected strokes');
+                break;
+            case 'enlarge':
+                CanvasActions.enlarge(this, strokeIds);
+                this.canvasManager.showToast('Enlarged strokes');
+                break;
+        }
+        
+        this.redraw();
+    }
+    
 }
