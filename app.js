@@ -188,7 +188,7 @@ class DrawingPad {
         
         this.ctx.save();
         
-        // Change color if stroke is selected
+        // Change color if stroke is selected, but preserve all other properties
         if (stroke.selected) {
             this.ctx.strokeStyle = '#007AFF';
             this.ctx.shadowColor = '#007AFF';
@@ -198,7 +198,7 @@ class DrawingPad {
             this.ctx.shadowBlur = 0;
         }
         
-        // Draw smooth curve through points
+        // Draw smooth curve through points with original pressure-based widths
         this.ctx.beginPath();
         this.ctx.moveTo(points[0].x, points[0].y);
         
@@ -214,7 +214,7 @@ class DrawingPad {
             
             this.ctx.quadraticCurveTo(cp1x, cp1y, currentPoint.x, currentPoint.y);
             
-            // Set line width based on pressure
+            // Set line width based on pressure (preserve original width)
             this.ctx.lineWidth = Math.max(1, pressure * 20);
             
             // Apply tilt effect by rotating the context
@@ -283,12 +283,9 @@ class DrawingPad {
     
     getPointFromEvent(event) {
         const rect = this.canvas.getBoundingClientRect();
-        const scaleX = this.canvas.width / rect.width;
-        const scaleY = this.canvas.height / rect.height;
-        
         return {
-            x: (event.clientX - rect.left) * scaleX,
-            y: (event.clientY - rect.top) * scaleY
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top
         };
     }
     
