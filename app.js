@@ -41,8 +41,8 @@ class DrawingPad {
     
     resizeCanvas() {
         const rect = this.canvas.getBoundingClientRect();
-        this.canvas.width = window.innerWidth;
-        this.canvas.height = window.innerHeight;
+        this.canvas.width = rect.width;
+        this.canvas.height = rect.height;
         this.redraw();
     }
     

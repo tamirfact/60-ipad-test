@@ -21,6 +21,7 @@ body {
     height: 100vh;
     cursor: crosshair;
     background: white;
+    display: block;
 }
 
 #clearButton {
