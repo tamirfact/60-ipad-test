@@ -188,7 +188,7 @@ class DrawingPad {
         
         this.ctx.save();
         
-        // Change color if stroke is selected, but preserve all other properties
+        // Change color if stroke is selected
         if (stroke.selected) {
             this.ctx.strokeStyle = '#007AFF';
             this.ctx.shadowColor = '#007AFF';
@@ -198,7 +198,7 @@ class DrawingPad {
             this.ctx.shadowBlur = 0;
         }
         
-        // Draw smooth curve through points with original pressure-based widths
+        // Draw smooth curve through points
         this.ctx.beginPath();
         this.ctx.moveTo(points[0].x, points[0].y);
         
