@@ -219,26 +219,21 @@ class DrawingPad {
             this.ctx.shadowBlur = 0;
         }
         
-        // Draw smooth curve through points
-        this.ctx.beginPath();
-        this.ctx.moveTo(points[0].x, points[0].y);
-        
+        // Draw each segment with its own pressure
         for (let i = 1; i < points.length; i++) {
             const prevPoint = points[i - 1];
             const currentPoint = points[i];
             const pressure = pressures[i];
             
-            // Calculate control point for smooth curve
-            const cp1x = prevPoint.x + (currentPoint.x - prevPoint.x) * 0.5;
-            const cp1y = prevPoint.y + (currentPoint.y - prevPoint.y) * 0.5;
-            
-            this.ctx.quadraticCurveTo(cp1x, cp1y, currentPoint.x, currentPoint.y);
-            
-            // Set line width based on pressure
+            // Set line width for this segment
             this.ctx.lineWidth = Math.max(1, pressure * 20);
+            
+            // Draw this segment
+            this.ctx.beginPath();
+            this.ctx.moveTo(prevPoint.x, prevPoint.y);
+            this.ctx.lineTo(currentPoint.x, currentPoint.y);
+            this.ctx.stroke();
         }
-        
-        this.ctx.stroke();
         this.ctx.restore();
     }
     
