@@ -19,6 +19,9 @@ class DrawingPad {
         this.dragOffset = { x: 0, y: 0 };
         this.selectedStroke = null;
         this.draggedStrokes = []; // Strokes being dragged together
+        this.isLassoSelecting = false;
+        this.lassoPoints = []; // Points for lasso selection
+        this.selectedStrokes = []; // Strokes selected by lasso
         
         this.setupCanvas();
         this.setupEventListeners();
@@ -82,10 +85,22 @@ class DrawingPad {
             // Touch mode - check if hitting an existing stroke
             this.selectedStroke = this.findStrokeAtPoint(point);
             if (this.selectedStroke) {
-                // Visual feedback: highlight the selected stroke
-                this.selectedStroke.selected = true;
+                // Check if this stroke is already selected by lasso
+                if (this.selectedStrokes.includes(this.selectedStroke)) {
+                    // Start dragging all selected strokes
+                    this.draggedStrokes = [...this.selectedStrokes];
+                } else {
+                    // Clear lasso selection and select single stroke
+                    this.clearLassoSelection();
+                    this.selectedStroke.selected = true;
+                    this.draggedStrokes = [this.selectedStroke];
+                }
                 this.redraw();
                 this.startDragging(point);
+            } else {
+                // Start lasso selection if no stroke is hit
+                this.clearLassoSelection();
+                this.startLassoSelection(point);
             }
         }
     }
@@ -99,6 +114,8 @@ class DrawingPad {
             this.continueDrawing(point, e);
         } else if (this.isDragging && e.pointerType === 'touch' && this.selectedStroke) {
             this.continueDragging(point);
+        } else if (this.isLassoSelecting && e.pointerType === 'touch') {
+            this.continueLassoSelection(point);
         }
     }
     
@@ -109,6 +126,8 @@ class DrawingPad {
             this.finishDrawing();
         } else if (this.isDragging) {
             this.finishDragging();
+        } else if (this.isLassoSelecting) {
+            this.finishLassoSelection();
         }
     }
     
@@ -164,8 +183,10 @@ class DrawingPad {
             y: point.y
         };
         
-        // Find all strokes within proximity of the selected stroke
-        this.draggedStrokes = this.findNearbyStrokes(this.selectedStroke, 50); // 50px tolerance
+        // If no dragged strokes set, find nearby strokes
+        if (this.draggedStrokes.length === 0) {
+            this.draggedStrokes = this.findNearbyStrokes(this.selectedStroke, 50); // 50px tolerance
+        }
     }
     
     continueDragging(point) {
@@ -199,6 +220,44 @@ class DrawingPad {
         this.selectedStroke = null;
         this.draggedStrokes = [];
         this.dragOffset = { x: 0, y: 0 };
+        this.redraw();
+    }
+    
+    clearLassoSelection() {
+        // Clear selection from all lasso-selected strokes
+        this.selectedStrokes.forEach(stroke => {
+            stroke.selected = false;
+        });
+        this.selectedStrokes = [];
+    }
+    
+    startLassoSelection(point) {
+        this.isLassoSelecting = true;
+        this.lassoPoints = [point];
+        this.selectedStrokes = [];
+    }
+    
+    continueLassoSelection(point) {
+        if (this.isLassoSelecting) {
+            this.lassoPoints.push(point);
+            this.redraw();
+        }
+    }
+    
+    finishLassoSelection() {
+        this.isLassoSelecting = false;
+        
+        if (this.lassoPoints.length > 2) {
+            // Find strokes that intersect with the lasso path
+            this.selectedStrokes = this.findStrokesInLasso(this.lassoPoints);
+            
+            // Mark selected strokes
+            this.selectedStrokes.forEach(stroke => {
+                stroke.selected = true;
+            });
+        }
+        
+        this.lassoPoints = [];
         this.redraw();
     }
     
@@ -259,12 +318,37 @@ class DrawingPad {
     redraw() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         
+        // Draw lasso selection if active
+        if (this.isLassoSelecting && this.lassoPoints.length > 1) {
+            this.drawLassoSelection();
+        }
+        
         // Redraw all strokes
         this.strokes.forEach(stroke => {
             if (stroke.points.length > 1) {
                 this.drawStrokeSegment(stroke);
             }
         });
+    }
+    
+    drawLassoSelection() {
+        if (this.lassoPoints.length < 2) return;
+        
+        this.ctx.save();
+        this.ctx.strokeStyle = '#007AFF';
+        this.ctx.lineWidth = 2;
+        this.ctx.setLineDash([5, 5]);
+        this.ctx.lineCap = 'round';
+        
+        this.ctx.beginPath();
+        this.ctx.moveTo(this.lassoPoints[0].x, this.lassoPoints[0].y);
+        
+        for (let i = 1; i < this.lassoPoints.length; i++) {
+            this.ctx.lineTo(this.lassoPoints[i].x, this.lassoPoints[i].y);
+        }
+        
+        this.ctx.stroke();
+        this.ctx.restore();
     }
     
     findStrokeAtPoint(point) {
@@ -320,6 +404,38 @@ class DrawingPad {
         });
         
         return nearbyStrokes;
+    }
+    
+    findStrokesInLasso(lassoPoints) {
+        const selectedStrokes = [];
+        
+        this.strokes.forEach(stroke => {
+            // Check if any point of the stroke is inside the lasso polygon
+            let isInside = false;
+            
+            stroke.points.forEach(point => {
+                if (this.isPointInPolygon(point, lassoPoints)) {
+                    isInside = true;
+                }
+            });
+            
+            if (isInside) {
+                selectedStrokes.push(stroke);
+            }
+        });
+        
+        return selectedStrokes;
+    }
+    
+    isPointInPolygon(point, polygon) {
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            if (((polygon[i].y > point.y) !== (polygon[j].y > point.y)) &&
+                (point.x < (polygon[j].x - polygon[i].x) * (point.y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x)) {
+                inside = !inside;
+            }
+        }
+        return inside;
     }
     
     getStrokeBounds(stroke) {
