@@ -67,6 +67,9 @@ class DrawingPad {
             // Touch mode - check if hitting an existing stroke
             this.selectedStroke = this.findStrokeAtPoint(point);
             if (this.selectedStroke) {
+                // Visual feedback: highlight the selected stroke
+                this.selectedStroke.selected = true;
+                this.redraw();
                 this.startDragging(point);
             }
         }
@@ -100,7 +103,8 @@ class DrawingPad {
             points: [point],
             pressures: [event.pressure || 0.5],
             tilts: [{ x: event.tiltX || 0, y: event.tiltY || 0 }],
-            type: 'pen'
+            type: 'pen',
+            selected: false
         };
         
         this.drawPoint(point, event.pressure || 0.5, event.tiltX || 0, event.tiltY || 0);
@@ -150,8 +154,12 @@ class DrawingPad {
     
     finishDragging() {
         this.isDragging = false;
+        if (this.selectedStroke) {
+            this.selectedStroke.selected = false;
+        }
         this.selectedStroke = null;
         this.dragOffset = { x: 0, y: 0 };
+        this.redraw();
     }
     
     drawPoint(point, pressure, tiltX, tiltY) {
@@ -179,6 +187,16 @@ class DrawingPad {
         const tilts = stroke.tilts;
         
         this.ctx.save();
+        
+        // Change color if stroke is selected
+        if (stroke.selected) {
+            this.ctx.strokeStyle = '#007AFF';
+            this.ctx.shadowColor = '#007AFF';
+            this.ctx.shadowBlur = 10;
+        } else {
+            this.ctx.strokeStyle = '#000000';
+            this.ctx.shadowBlur = 0;
+        }
         
         // Draw smooth curve through points
         this.ctx.beginPath();
@@ -265,9 +283,12 @@ class DrawingPad {
     
     getPointFromEvent(event) {
         const rect = this.canvas.getBoundingClientRect();
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+        
         return {
-            x: event.clientX - rect.left,
-            y: event.clientY - rect.top
+            x: (event.clientX - rect.left) * scaleX,
+            y: (event.clientY - rect.top) * scaleY
         };
     }
     
