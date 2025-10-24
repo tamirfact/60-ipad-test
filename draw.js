@@ -39,8 +39,8 @@ class DrawingManager {
         this.dropZone = document.getElementById('dropZone');
         this.isOverDropZone = false;
         
-        // Actionable object hover state
-        this.hoveredSmartObject = null;
+        // Image object cache for performance
+        this.imageCache = new Map();
 
         // AI generator
         this.aiGenerator = new AIGenerator();
@@ -183,8 +183,8 @@ class DrawingManager {
         
         // Translate all points in all dragged strokes
         this.draggedStrokes.forEach(stroke => {
-            if (stroke.type === 'smart-object') {
-                // Move smart object position
+            if (stroke.type === 'image-object') {
+                // Move image object position
                 stroke.position.x += deltaX;
                 stroke.position.y += deltaY;
             } else if (stroke.points) {
@@ -199,8 +199,6 @@ class DrawingManager {
         // Check if dragging over drop zone
         this.checkDropZoneHover(point);
         
-        // Check if dragging over actionable smart object
-        this.updateActionableObjectHover(point);
         
         // Update the drag offset for the next frame
         this.dragOffset = {
@@ -221,17 +219,6 @@ class DrawingManager {
             return;
         }
 
-        // Check if dropped over actionable smart object
-        if (this.hoveredSmartObject && this.hoveredSmartObject.action) {
-            this.executeSmartObjectAction(this.hoveredSmartObject, this.draggedStrokes);
-            this.hoveredSmartObject = null;
-            this.selectedStroke = null;
-            this.draggedStrokes = [];
-            this.dragOffset = { x: 0, y: 0 };
-            this.hideDropZone();
-            this.redraw();
-            return;
-        }
 
         // Always hide the gradient when drag ends (for normal drags)
         this.hideDropZone();
@@ -378,50 +365,86 @@ class DrawingManager {
         this.ctx.restore();
     }
     
-    drawSmartObject(smartObject) {
+    drawImageObject(imageObj) {
         this.ctx.save();
 
-        // Set up large font for emoji
-        this.ctx.font = '48px Arial, sans-serif';
-        this.ctx.textAlign = 'center';
-        this.ctx.textBaseline = 'middle';
+        const x = imageObj.position.x - imageObj.width / 2;
+        const y = imageObj.position.y - imageObj.height / 2;
 
-        // Check if this is the hovered actionable object
-        const isHovered = this.hoveredSmartObject === smartObject;
-        const scale = isHovered ? 1.1 : 1.0;
-        const radius = 40 * scale;
+        // Draw white border
+        this.ctx.fillStyle = 'white';
+        this.ctx.fillRect(x - 10, y - 10, imageObj.width + 20, imageObj.height + 20);
 
-        // Apply scaling transform
-        this.ctx.translate(smartObject.position.x, smartObject.position.y);
-        this.ctx.scale(scale, scale);
-        this.ctx.translate(-smartObject.position.x, -smartObject.position.y);
+        // Draw shadow
+        this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+        this.ctx.shadowBlur = 15;
+        this.ctx.shadowOffsetX = 5;
+        this.ctx.shadowOffsetY = 5;
 
-        // Background circle for visibility
-        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-        
-        // Different border color for actionable objects
-        if (smartObject.action) {
-            this.ctx.strokeStyle = smartObject.selected ? '#007AFF' : '#FF6B35'; // Orange for actionable
-        } else {
-            this.ctx.strokeStyle = smartObject.selected ? '#007AFF' : '#CCCCCC';
+        // Draw image if available
+        if (imageObj.imageData) {
+            const img = this.getCachedImage(imageObj.imageData);
+            if (img) {
+                this.ctx.drawImage(img, x, y, imageObj.width, imageObj.height);
+            } else {
+                // Show placeholder while image is loading
+                this.ctx.fillStyle = '#F0F0F0';
+                this.ctx.fillRect(x, y, imageObj.width, imageObj.height);
+                
+                this.ctx.fillStyle = '#999999';
+                this.ctx.font = '16px Arial, sans-serif';
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                this.ctx.fillText('Loading...', imageObj.position.x, imageObj.position.y);
+            }
         }
-        this.ctx.lineWidth = 3;
 
-        // Draw background circle with more padding
-        this.ctx.beginPath();
-        this.ctx.arc(smartObject.position.x, smartObject.position.y, 40, 0, Math.PI * 2);
-        this.ctx.fill();
-        this.ctx.stroke();
+        // Reset shadow
+        this.ctx.shadowColor = 'transparent';
+        this.ctx.shadowBlur = 0;
+        this.ctx.shadowOffsetX = 0;
+        this.ctx.shadowOffsetY = 0;
 
-        // Draw emoji
-        this.ctx.fillStyle = '#000000';
-        this.ctx.fillText(
-            smartObject.emoji,
-            smartObject.position.x,
-            smartObject.position.y
-        );
+        // Draw selection border if selected
+        if (imageObj.selected) {
+            this.ctx.strokeStyle = '#007AFF';
+            this.ctx.lineWidth = 3;
+            this.ctx.strokeRect(x - 10, y - 10, imageObj.width + 20, imageObj.height + 20);
+        }
+
+        // Draw loading indicator if generating
+        if (imageObj.isGenerating) {
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            this.ctx.fillRect(x, y, imageObj.width, imageObj.height);
+            
+            this.ctx.fillStyle = 'white';
+            this.ctx.font = '16px Arial, sans-serif';
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
+            this.ctx.fillText(
+                `Generating... ${imageObj.currentFrame + 1}/2`,
+                imageObj.position.x,
+                imageObj.position.y
+            );
+        }
 
         this.ctx.restore();
+    }
+
+    getCachedImage(imageData) {
+        if (this.imageCache.has(imageData)) {
+            return this.imageCache.get(imageData);
+        }
+
+        const img = new Image();
+        img.onload = () => {
+            this.imageCache.set(imageData, img);
+            // Trigger a redraw when the image loads
+            this.redraw();
+        };
+        img.src = `data:image/png;base64,${imageData}`;
+        
+        return null; // Return null initially, will be cached on load
     }
     
     redraw() {
@@ -431,10 +454,10 @@ class DrawingManager {
                 this.drawLassoSelection();
             }
             
-            // Redraw all strokes and smart objects
+            // Redraw all strokes and image objects
             this.strokes.forEach(stroke => {
-                if (stroke.type === 'smart-object') {
-                    this.drawSmartObject(stroke);
+                if (stroke.type === 'image-object') {
+                    this.drawImageObject(stroke);
                 } else if (stroke.points && stroke.points.length > 1) {
                     this.drawStrokeSegment(stroke);
                 }
@@ -448,15 +471,13 @@ class DrawingManager {
         for (let i = this.strokes.length - 1; i >= 0; i--) {
             const stroke = this.strokes[i];
             
-            // Check smart objects (emoji)
-            if (stroke.type === 'smart-object') {
-                const radius = 40;
-                const distance = Math.sqrt(
-                    Math.pow(point.x - stroke.position.x, 2) +
-                    Math.pow(point.y - stroke.position.y, 2)
-                );
-
-                if (distance <= radius) {
+            // Check image objects
+            if (stroke.type === 'image-object') {
+                const x = stroke.position.x - stroke.width / 2;
+                const y = stroke.position.y - stroke.height / 2;
+                
+                if (point.x >= x - 10 && point.x <= x + stroke.width + 10 &&
+                    point.y >= y - 10 && point.y <= y + stroke.height + 10) {
                     return stroke;
                 }
             } else {
@@ -555,16 +576,17 @@ class DrawingManager {
     }
     
     getStrokeBounds(stroke) {
-        // Handle smart objects (emoji)
-        if (stroke.type === 'smart-object') {
-            const radius = 40;
+        // Handle image objects
+        if (stroke.type === 'image-object') {
+            const x = stroke.position.x - stroke.width / 2;
+            const y = stroke.position.y - stroke.height / 2;
             return {
                 centerX: stroke.position.x,
                 centerY: stroke.position.y,
-                minX: stroke.position.x - radius,
-                maxX: stroke.position.x + radius,
-                minY: stroke.position.y - radius,
-                maxY: stroke.position.y + radius
+                minX: x - 10,
+                maxX: x + stroke.width + 10,
+                minY: y - 10,
+                maxY: y + stroke.height + 10
             };
         }
         
@@ -677,72 +699,14 @@ class DrawingManager {
         await this.aiGenerator.processDrawing(this, this.draggedStrokes);
     }
     
-    findSmartObjectAtPoint(point) {
-        for (let i = this.strokes.length - 1; i >= 0; i--) {
-            const stroke = this.strokes[i];
-            
-            if (stroke.type === 'smart-object') {
-                const radius = 40;
-                const distance = Math.sqrt(
-                    Math.pow(point.x - stroke.position.x, 2) +
-                    Math.pow(point.y - stroke.position.y, 2)
-                );
-
-                if (distance <= radius) {
-                    return stroke;
-                }
-            }
-        }
-        return null;
+    getCanvasContext() {
+        return {
+            hasImages: this.strokes.some(s => s.type === 'image-object'),
+            imageCount: this.strokes.filter(s => s.type === 'image-object').length,
+            hasStrokes: this.strokes.some(s => s.type !== 'image-object'),
+            strokeCount: this.strokes.filter(s => s.type !== 'image-object').length
+        };
     }
     
-    updateActionableObjectHover(point) {
-        const smartObject = this.findSmartObjectAtPoint(point);
-        
-        if (smartObject && smartObject.action) {
-            // Hovering over actionable smart object
-            if (this.hoveredSmartObject !== smartObject) {
-                this.hoveredSmartObject = smartObject;
-                this.redraw();
-            }
-        } else {
-            // Not hovering over actionable smart object
-            if (this.hoveredSmartObject) {
-                this.hoveredSmartObject = null;
-                this.redraw();
-            }
-        }
-    }
-    
-    executeSmartObjectAction(smartObject, draggedStrokes) {
-        if (!smartObject.action) return;
-        
-        // Filter out smart objects from dragged strokes - only act on regular strokes
-        const regularStrokes = draggedStrokes.filter(stroke => stroke.type !== 'smart-object');
-        
-        if (regularStrokes.length === 0) {
-            this.canvasManager.showToast('No strokes to process');
-            return;
-        }
-        
-        const strokeIds = regularStrokes.map(s => this.strokes.indexOf(s));
-        
-        switch(smartObject.action) {
-            case 'delete':
-                CanvasActions.delete(this, strokeIds);
-                this.canvasManager.showToast('Deleted strokes');
-                break;
-            case 'reflect':
-                CanvasActions.reflect(this, strokeIds);
-                this.canvasManager.showToast('Reflected strokes');
-                break;
-            case 'enlarge':
-                CanvasActions.enlarge(this, strokeIds);
-                this.canvasManager.showToast('Enlarged strokes');
-                break;
-        }
-        
-        this.redraw();
-    }
     
 }

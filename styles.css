@@ -149,3 +149,14 @@ body {
 #dropZone.drop-zone-fade-8 { opacity: 0.5; }
 #dropZone.drop-zone-fade-9 { opacity: 0.9; }
 #dropZone.drop-zone-fade-10 { opacity: 1.0; }
+
+/* Loading indicator for image generation */
+.image-loading {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 0.5; }
+    50% { opacity: 1; }
+    100% { opacity: 0.5; }
+}

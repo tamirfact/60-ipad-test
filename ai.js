@@ -1,10 +1,11 @@
-// AI Generation Logic for Smart Objects
+// AI Generation Logic for Image Generation
 class AIGenerator {
     constructor() {
         this.apiKey = window.OPENAI_API_KEY;
+        this.imageGenerator = new ImageGenerator(this.apiKey);
     }
 
-    async analyzeDrawing(imageData) {
+    async analyzeAction(imageData, contentType, canvasContext) {
         if (!this.apiKey || this.apiKey === 'your-openai-api-key-here') {
             throw new Error('OpenAI API key not found. Please set it in env.js file.');
         }
@@ -22,7 +23,19 @@ class AIGenerator {
                     content: [
                         {
                             type: 'text',
-                            text: 'Analyze this drawing and return a JSON object with: "emoji" (single emoji representing the drawing), "behavior" (creative description), and optionally "action" (one of: "delete", "reflect", "enlarge" if the drawing represents that action - e.g., trash can = delete, mirror = reflect, magnifying glass = enlarge). Return ONLY valid JSON, no other text. Example: {"emoji": "🎨", "behavior": "Creative tool"} or {"emoji": "🗑️", "behavior": "Deletes items", "action": "delete"}'
+                            text: `Analyze the dragged content and canvas state to determine:
+1. action_type: "generate" (new image from sketch), "update" (edit existing image), or "execute_action" (perform action like delete)
+2. image_prompt: Detailed prompt for image generation (if generate/update)
+3. description: What action is being performed
+
+Context provided:
+- Dragged content type: ${contentType}
+- Canvas has images: ${canvasContext.hasImages}
+- Canvas has strokes: ${canvasContext.hasStrokes}
+- Image count: ${canvasContext.imageCount}
+- Stroke count: ${canvasContext.strokeCount}
+
+Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}`
                         },
                         {
                             type: 'image_url',
@@ -50,31 +63,43 @@ class AIGenerator {
             console.error('Failed to parse JSON response:', content);
             // Fallback if JSON parsing fails
             return {
-                emoji: "📦",
-                behavior: "A mysterious object that reacts to touch"
+                action_type: "generate",
+                image_prompt: "A beautiful artistic illustration",
+                description: "Generate new image from sketch"
             };
         }
     }
 
     async processDrawing(drawingManager, draggedStrokes) {
         try {
+            // Analyze content type
+            const contentType = this.analyzeContent(draggedStrokes);
+            const canvasContext = drawingManager.getCanvasContext();
+            
             // Capture the drawing as image
             const imageData = this.captureSelectedStrokes(drawingManager, draggedStrokes);
             
             // Show debug toast with captured image
-            drawingManager.canvasManager.showToast('Sending to AI...', imageData);
+            drawingManager.canvasManager.showToast('Analyzing...', imageData);
             
             // Wait a moment to show the debug image
             await new Promise(resolve => setTimeout(resolve, 2000));
             
-            // Process with LLM
-            const result = await this.analyzeDrawing(imageData);
+            // Analyze action
+            const action = await this.analyzeAction(imageData, contentType, canvasContext);
             
-            // Create smart object
-            this.createSmartObject(drawingManager, result, draggedStrokes);
-            
-            // Show success toast
-            drawingManager.canvasManager.showToast('Smart object created!');
+            // Execute based on action type
+            switch(action.action_type) {
+                case 'generate':
+                    await this.generateNewImage(drawingManager, action.image_prompt, imageData);
+                    break;
+                case 'update':
+                    await this.updateExistingImage(drawingManager, action.image_prompt, draggedStrokes);
+                    break;
+                case 'execute_action':
+                    await this.executeCustomAction(drawingManager, action, draggedStrokes);
+                    break;
+            }
             
         } catch (error) {
             console.error('Error processing drawing:', error);
@@ -91,13 +116,14 @@ class AIGenerator {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         
         draggedStrokes.forEach(stroke => {
-            if (stroke.type === 'smart-object') {
-                // For smart objects, use position and radius
-                const radius = 40;
-                minX = Math.min(minX, stroke.position.x - radius);
-                minY = Math.min(minY, stroke.position.y - radius);
-                maxX = Math.max(maxX, stroke.position.x + radius);
-                maxY = Math.max(maxY, stroke.position.y + radius);
+            if (stroke.type === 'image-object') {
+                // For image objects, use position and dimensions
+                const x = stroke.position.x - stroke.width / 2;
+                const y = stroke.position.y - stroke.height / 2;
+                minX = Math.min(minX, x - 10);
+                minY = Math.min(minY, y - 10);
+                maxX = Math.max(maxX, x + stroke.width + 10);
+                maxY = Math.max(maxY, y + stroke.height + 10);
             } else if (stroke.points) {
                 // For regular strokes, use points
                 stroke.points.forEach(point => {
@@ -131,18 +157,17 @@ class AIGenerator {
         
         // Draw selected strokes
         draggedStrokes.forEach(stroke => {
-            if (stroke.type === 'smart-object') {
-                // Draw smart object as emoji
-                tempCtx.save();
-                tempCtx.font = '48px Arial, sans-serif';
-                tempCtx.textAlign = 'center';
-                tempCtx.textBaseline = 'middle';
-                tempCtx.fillStyle = '#000000';
-                
-                const x = stroke.position.x - minX + 40;
-                const y = stroke.position.y - minY + 40;
-                tempCtx.fillText(stroke.emoji, x, y);
-                tempCtx.restore();
+            if (stroke.type === 'image-object') {
+                // Draw image object
+                if (stroke.imageData) {
+                    const img = new Image();
+                    img.onload = () => {
+                        const x = stroke.position.x - minX + 40 - stroke.width / 2;
+                        const y = stroke.position.y - minY + 40 - stroke.height / 2;
+                        tempCtx.drawImage(img, x, y, stroke.width, stroke.height);
+                    };
+                    img.src = `data:image/png;base64,${stroke.imageData}`;
+                }
             } else if (stroke.points && stroke.points.length > 1) {
                 // Draw regular stroke with pressure-based line width
                 tempCtx.lineCap = 'round';
@@ -169,39 +194,157 @@ class AIGenerator {
         return tempCanvas.toDataURL('image/png');
     }
 
-    createSmartObject(drawingManager, result, draggedStrokes) {
-        // Place smart object in the center of the canvas
-        const centerX = drawingManager.canvas.width / 2;
-        const centerY = drawingManager.canvas.height / 2;
+    analyzeContent(draggedStrokes) {
+        const hasImages = draggedStrokes.some(stroke => stroke.type === 'image-object');
+        const hasStrokes = draggedStrokes.some(stroke => stroke.type !== 'image-object');
         
-        // Create smart object
-        const smartObject = {
-            type: 'smart-object',
-            position: { x: centerX, y: centerY },
-            emoji: result.emoji,
-            behavior: result.behavior,
-            action: result.action || null,
-            selected: false
-        };
-        
-        // Remove original strokes
-        draggedStrokes.forEach(stroke => {
+        if (hasImages && hasStrokes) {
+            return 'sketch + image';
+        } else if (hasImages) {
+            return 'image only';
+        } else {
+            return 'sketch only';
+        }
+    }
+    
+    async generateNewImage(drawingManager, prompt, sketchImageData) {
+        // Remove original sketch strokes first
+        const originalStrokes = drawingManager.draggedStrokes.filter(stroke => stroke.type !== 'image-object');
+        originalStrokes.forEach(stroke => {
             const index = drawingManager.strokes.indexOf(stroke);
             if (index > -1) {
                 drawingManager.strokes.splice(index, 1);
             }
         });
         
-        // Add smart object
-        drawingManager.strokes.push(smartObject);
+        // Create placeholder image object
+        const imageObj = {
+            type: 'image-object',
+            position: { 
+                x: drawingManager.canvas.width / 2, 
+                y: drawingManager.canvas.height / 2 
+            },
+            width: 512,
+            height: 512,
+            imageData: null,
+            selected: false,
+            isGenerating: true,
+            currentFrame: 0
+        };
         
-        // Save state for undo
-        drawingManager.undoManager.save();
-        
-        // Clear selection
-        drawingManager.draggedStrokes = [];
-        drawingManager.selectedStrokes = [];
-        
+        drawingManager.strokes.push(imageObj);
         drawingManager.redraw();
+        
+        // Show generating toast
+        drawingManager.canvasManager.showToast('Generating image...');
+        
+        try {
+            // Create a realistic prompt based on the sketch
+            const realisticPrompt = `Create a photorealistic, high-quality image based on this sketch. Make it look professional and realistic with proper lighting, shadows, and details. ${prompt}`;
+            
+            await this.imageGenerator.generateImage(
+                realisticPrompt,
+                (partialBase64, frameIndex) => {
+                    // Not used for single image
+                },
+                (finalBase64) => {
+                    // Update final image
+                    imageObj.imageData = finalBase64;
+                    imageObj.isGenerating = false;
+                    drawingManager.undoManager.save();
+                    drawingManager.redraw();
+                    drawingManager.canvasManager.showToast('Image generated!');
+                    
+                    // Force another redraw after a short delay to ensure image loads
+                    setTimeout(() => {
+                        drawingManager.redraw();
+                    }, 100);
+                },
+                sketchImageData
+            );
+        } catch (error) {
+            console.error('Image generation failed:', error);
+            // Remove failed image object
+            const index = drawingManager.strokes.indexOf(imageObj);
+            if (index > -1) {
+                drawingManager.strokes.splice(index, 1);
+            }
+            drawingManager.redraw();
+            drawingManager.canvasManager.showToast('Image generation failed');
+        }
+    }
+    
+    async updateExistingImage(drawingManager, prompt, draggedStrokes) {
+        // Find the image object to update
+        const imageObj = draggedStrokes.find(stroke => stroke.type === 'image-object');
+        if (!imageObj) {
+            drawingManager.canvasManager.showToast('No image found to update');
+            return;
+        }
+        
+        // Remove sketch strokes first
+        const sketchStrokes = draggedStrokes.filter(stroke => stroke.type !== 'image-object');
+        sketchStrokes.forEach(stroke => {
+            const index = drawingManager.strokes.indexOf(stroke);
+            if (index > -1) {
+                drawingManager.strokes.splice(index, 1);
+            }
+        });
+        
+        // Set generating state
+        imageObj.isGenerating = true;
+        imageObj.currentFrame = 0;
+        drawingManager.redraw();
+        
+        drawingManager.canvasManager.showToast('Updating image...');
+        
+        try {
+            // Convert image to blob for editing
+            const imageBlob = this.imageGenerator.base64ToBlob(imageObj.imageData);
+            
+            await this.imageGenerator.editImage(
+                [imageBlob],
+                prompt,
+                (partialBase64, frameIndex) => {
+                    // Not used for single image
+                },
+                (finalBase64) => {
+                    imageObj.imageData = finalBase64;
+                    imageObj.isGenerating = false;
+                    drawingManager.undoManager.save();
+                    drawingManager.redraw();
+                    drawingManager.canvasManager.showToast('Image updated!');
+                    
+                    // Force another redraw after a short delay to ensure image loads
+                    setTimeout(() => {
+                        drawingManager.redraw();
+                    }, 100);
+                }
+            );
+        } catch (error) {
+            console.error('Image update failed:', error);
+            imageObj.isGenerating = false;
+            drawingManager.redraw();
+            drawingManager.canvasManager.showToast('Image update failed');
+        }
+    }
+    
+    async executeCustomAction(drawingManager, action, draggedStrokes) {
+        // Handle custom actions like delete
+        if (action.description.toLowerCase().includes('delete')) {
+            // Remove dragged strokes
+            const strokeIds = draggedStrokes.map(s => drawingManager.strokes.indexOf(s));
+            strokeIds.sort((a, b) => b - a); // Sort in reverse order
+            
+            strokeIds.forEach(id => {
+                if (id >= 0 && id < drawingManager.strokes.length) {
+                    drawingManager.strokes.splice(id, 1);
+                }
+            });
+            
+            drawingManager.undoManager.save();
+            drawingManager.redraw();
+            drawingManager.canvasManager.showToast('Items deleted');
+        }
     }
 }
