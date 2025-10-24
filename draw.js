@@ -233,6 +233,9 @@ class DrawingManager {
             return;
         }
 
+        // Always hide the gradient when drag ends (for normal drags)
+        this.hideDropZone();
+
         // If we were dragging a group, keep all strokes in the group selected
         if (this.draggedStrokes.length > 1) {
             // Keep all dragged strokes selected
@@ -249,7 +252,6 @@ class DrawingManager {
         this.selectedStroke = null;
         this.draggedStrokes = [];
         this.dragOffset = { x: 0, y: 0 };
-        this.hideDropZone();
         this.redraw();
     }
     
@@ -615,22 +617,52 @@ class DrawingManager {
         this.dropZone.classList.remove('drop-zone-visible');
         this.dropZone.classList.add('drop-zone-hidden');
         this.dropZone.classList.remove('drag-over');
+        // Remove all fade classes
+        this.dropZone.classList.remove('drop-zone-fade-1', 'drop-zone-fade-2', 'drop-zone-fade-3', 
+                                     'drop-zone-fade-4', 'drop-zone-fade-5', 'drop-zone-fade-6', 
+                                     'drop-zone-fade-7', 'drop-zone-fade-8', 'drop-zone-fade-9', 'drop-zone-fade-10');
         this.isOverDropZone = false;
     }
     
     checkDropZoneHover(point) {
-        const dropZoneRect = this.dropZone.getBoundingClientRect();
         const canvasRect = this.canvas.getBoundingClientRect();
         
         // Convert canvas coordinates to screen coordinates
         const screenX = point.x + canvasRect.left;
         const screenY = point.y + canvasRect.top;
         
-        // Check if point is within drop zone bounds
-        const isOver = screenX >= dropZoneRect.left && 
-                      screenX <= dropZoneRect.right && 
-                      screenY >= dropZoneRect.top && 
-                      screenY <= dropZoneRect.bottom;
+        // Calculate distance from drag point to top-right corner
+        const cornerX = canvasRect.left + canvasRect.width;
+        const cornerY = canvasRect.top;
+        
+        const distance = Math.sqrt(
+            Math.pow(screenX - cornerX, 2) + 
+            Math.pow(screenY - cornerY, 2)
+        );
+        
+        // Calculate max distance (from opposite corner to top-right)
+        const maxDistance = Math.sqrt(
+            Math.pow(canvasRect.width, 2) + 
+            Math.pow(canvasRect.height, 2)
+        );
+        
+        // Calculate opacity based on distance (closer to corner = more visible)
+        const normalizedDistance = Math.min(distance / maxDistance, 1);
+        const opacity = 1 - normalizedDistance;
+        
+        // Remove all fade classes first
+        this.dropZone.classList.remove('drop-zone-fade-1', 'drop-zone-fade-2', 'drop-zone-fade-3', 
+                                     'drop-zone-fade-4', 'drop-zone-fade-5', 'drop-zone-fade-6', 
+                                     'drop-zone-fade-7', 'drop-zone-fade-8', 'drop-zone-fade-9', 'drop-zone-fade-10');
+        
+        // Add appropriate fade class based on opacity
+        const fadeLevel = Math.round(opacity * 10);
+        if (fadeLevel > 0) {
+            this.dropZone.classList.add(`drop-zone-fade-${fadeLevel}`);
+        }
+        
+        // Check if close enough to trigger drop (within 100px of corner)
+        const isOver = distance < 100;
         
         if (isOver && !this.isOverDropZone) {
             this.dropZone.classList.add('drag-over');
@@ -685,7 +717,15 @@ class DrawingManager {
     executeSmartObjectAction(smartObject, draggedStrokes) {
         if (!smartObject.action) return;
         
-        const strokeIds = draggedStrokes.map(s => this.strokes.indexOf(s));
+        // Filter out smart objects from dragged strokes - only act on regular strokes
+        const regularStrokes = draggedStrokes.filter(stroke => stroke.type !== 'smart-object');
+        
+        if (regularStrokes.length === 0) {
+            this.canvasManager.showToast('No strokes to process');
+            return;
+        }
+        
+        const strokeIds = regularStrokes.map(s => this.strokes.indexOf(s));
         
         switch(smartObject.action) {
             case 'delete':
