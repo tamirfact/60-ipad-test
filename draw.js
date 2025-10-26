@@ -1,6 +1,5 @@
 import { AIGenerator } from './ai.js';
 import { ImageGenerator } from './imageGen.js';
-import { AIUploadHandler } from './aiUploadHandler.js';
 
 class DrawingManager {
     constructor(canvas, ctx, canvasManager) {
@@ -61,11 +60,14 @@ class DrawingManager {
         this.showLongTapProgress = false;
         this.longTapStartTime = null;
 
+        // Delete zone state
+        this.isOverDeleteZone = false;
+        this.deleteZoneScale = 1.0; // Current scale for delete zone animation
+        this.deleteZoneTargetScale = 1.0; // Target scale (1.0 = normal, 0.5 = delete zone)
+        this.deleteZoneAnimationSpeed = 0.1; // How fast the animation transitions
+
         // AI generator
         this.aiGenerator = new AIGenerator();
-        
-        // AI upload handler
-        this.aiUploadHandler = new AIUploadHandler(this.aiGenerator);
 
         this.setupEventListeners();
     }
@@ -231,8 +233,29 @@ class DrawingManager {
         this.isLongTapping = false;
         this.showLongTapProgress = false;
         
-        // Use AIUploadHandler for consistent behavior and logging
-        this.aiUploadHandler.handleAIUpload(this, this.draggedStrokes, 'long-tap');
+        // Check if we have both strokes and images (two-step process)
+        const hasImages = this.draggedStrokes.some(stroke => stroke.type === 'image-object');
+        const hasStrokes = this.draggedStrokes.some(stroke => stroke.type !== 'image-object');
+        
+        if (hasImages && hasStrokes) {
+            // Two-step process: don't remove strokes yet, they'll be removed when user selects a chip
+            // Just process with AI (strokes will be removed in selectEditOption)
+        } else {
+            // Single-step process: remove strokes immediately (like drop zone behavior)
+            this.draggedStrokes.forEach(stroke => {
+                const index = this.strokes.indexOf(stroke);
+                if (index > -1) {
+                    this.strokes.splice(index, 1);
+                }
+            });
+        }
+        
+        // Process with AI (same as drop zone behavior)
+        this.aiGenerator.processDrawing(this, this.draggedStrokes);
+        
+        // Clear selections immediately (like drop zone behavior)
+        this.clearAllSelections();
+        this.redraw();
     }
 
     startDrawing(point, event) {
@@ -308,6 +331,8 @@ class DrawingManager {
         // Check if dragging over drop zone
         this.checkDropZoneHover(point);
         
+        // Check if dragging over delete zone
+        this.checkDeleteZoneHover(point);
         
         // Update the drag offset for the next frame
         this.dragOffset = {
@@ -321,6 +346,16 @@ class DrawingManager {
     finishDragging() {
         this.isDragging = false;
 
+        // Check if dropped over delete zone
+        if (this.isOverDeleteZone) {
+            this.handleDeleteZoneDrop();
+            this.isOverDeleteZone = false;
+            this.deleteZoneScale = 1.0;
+            this.deleteZoneTargetScale = 1.0;
+            this.hideDropZone();
+            return;
+        }
+
         // Check if dropped over drop zone
         if (this.isOverDropZone) {
             this.handleDropZoneDrop();
@@ -331,6 +366,11 @@ class DrawingManager {
 
         // Always hide the gradient when drag ends (for normal drags)
         this.hideDropZone();
+        
+        // Reset delete zone animation state
+        this.isOverDeleteZone = false;
+        this.deleteZoneScale = 1.0;
+        this.deleteZoneTargetScale = 1.0;
 
         // If we were dragging a group, keep all strokes in the group selected
         if (this.draggedStrokes.length > 1) {
@@ -626,19 +666,33 @@ class DrawingManager {
     
     redraw() {
         this.canvasManager.redraw(() => {
-            // First, draw all image objects (background layer)
+            // First, draw all image objects (background layer) - non-dragged ones
             this.strokes.forEach(stroke => {
-                if (stroke.type === 'image-object') {
+                if (stroke.type === 'image-object' && !this.draggedStrokes.includes(stroke)) {
                     this.drawImageObject(stroke);
                 }
             });
             
-            // Then, draw all strokes on top (foreground layer)
+            // Then, draw all strokes on top (foreground layer) - non-dragged ones
             this.strokes.forEach(stroke => {
-                if (stroke.type !== 'image-object' && stroke.points && stroke.points.length > 1) {
+                if (stroke.type !== 'image-object' && stroke.points && stroke.points.length > 1 && !this.draggedStrokes.includes(stroke)) {
                     this.drawStrokeSegment(stroke);
                 }
             });
+            
+            // Draw dragged objects with delete zone feedback if applicable
+            if (this.isDragging && this.draggedStrokes.length > 0 && this.deleteZoneScale < 1.0) {
+                this.drawDraggedObjectsWithDeleteFeedback();
+            } else {
+                // Draw dragged objects normally
+                this.draggedStrokes.forEach(stroke => {
+                    if (stroke.type === 'image-object') {
+                        this.drawImageObject(stroke);
+                    } else if (stroke.points && stroke.points.length > 1) {
+                        this.drawStrokeSegment(stroke);
+                    }
+                });
+            }
             
             // Finally, draw lasso selection on top of everything
             if (this.isLassoSelecting && this.lassoPoints.length > 1) {
@@ -650,6 +704,50 @@ class DrawingManager {
                 this.drawLongTapProgress();
             }
         });
+    }
+    
+    drawDraggedObjectsWithDeleteFeedback() {
+        if (this.draggedStrokes.length === 0) return;
+        
+        // Calculate center point of all dragged objects
+        let centerX = 0, centerY = 0, count = 0;
+        
+        this.draggedStrokes.forEach(stroke => {
+            if (stroke.type === 'image-object') {
+                centerX += stroke.position.x;
+                centerY += stroke.position.y;
+                count++;
+            } else if (stroke.points && stroke.points.length > 0) {
+                stroke.points.forEach(point => {
+                    centerX += point.x;
+                    centerY += point.y;
+                    count++;
+                });
+            }
+        });
+        
+        if (count === 0) return;
+        
+        centerX /= count;
+        centerY /= count;
+        
+        // Apply transformations centered on the dragged objects
+        this.ctx.save();
+        this.ctx.globalAlpha = 0.5;
+        this.ctx.translate(centerX, centerY);
+        this.ctx.scale(this.deleteZoneScale, this.deleteZoneScale);
+        this.ctx.translate(-centerX, -centerY);
+        
+        // Redraw only the dragged objects with the transformations
+        this.draggedStrokes.forEach(stroke => {
+            if (stroke.type === 'image-object') {
+                this.drawImageObject(stroke);
+            } else if (stroke.points && stroke.points.length > 1) {
+                this.drawStrokeSegment(stroke);
+            }
+        });
+        
+        this.ctx.restore();
     }
     
     findStrokeAtPoint(point) {
@@ -882,9 +980,67 @@ class DrawingManager {
         }
     }
     
+    checkDeleteZoneHover(point) {
+        const canvasHeight = this.canvas.height;
+        const deleteZoneThreshold = canvasHeight * 0.9; // Bottom 10%
+        
+        if (point.y >= deleteZoneThreshold) {
+            if (!this.isOverDeleteZone) {
+                this.isOverDeleteZone = true;
+                this.deleteZoneTargetScale = 0.5; // Scale down to 50%
+                this.startDeleteZoneAnimation();
+            }
+        } else {
+            if (this.isOverDeleteZone) {
+                this.isOverDeleteZone = false;
+                this.deleteZoneTargetScale = 1.0; // Scale back to normal
+                this.startDeleteZoneAnimation();
+            }
+        }
+    }
+    
+    startDeleteZoneAnimation() {
+        const animate = () => {
+            // Smoothly interpolate towards the target scale
+            const diff = this.deleteZoneTargetScale - this.deleteZoneScale;
+            if (Math.abs(diff) > 0.01) {
+                this.deleteZoneScale += diff * this.deleteZoneAnimationSpeed;
+                this.redraw();
+                requestAnimationFrame(animate);
+            } else {
+                this.deleteZoneScale = this.deleteZoneTargetScale;
+                this.redraw();
+            }
+        };
+        animate();
+    }
+    
     async handleDropZoneDrop() {
-        // Use AIUploadHandler for consistent behavior and logging
-        await this.aiUploadHandler.handleAIUpload(this, this.draggedStrokes, 'drag-to-corner');
+        await this.aiGenerator.processDrawing(this, this.draggedStrokes);
+    }
+    
+    handleDeleteZoneDrop() {
+        // Remove dragged strokes from canvas
+        this.draggedStrokes.forEach(stroke => {
+            const index = this.strokes.indexOf(stroke);
+            if (index > -1) {
+                this.strokes.splice(index, 1);
+            }
+        });
+        
+        // Log the deletion
+        if (window.toastManager) {
+            window.toastManager.logInfo(`Deleted ${this.draggedStrokes.length} item(s)`);
+        }
+        
+        // Clear selections
+        this.clearAllSelections();
+        this.draggedStrokes = [];
+        this.selectedStroke = null;
+        
+        // Save state for undo
+        this.undoManager.save();
+        this.redraw();
     }
     
     getCanvasContext() {
@@ -894,23 +1050,6 @@ class DrawingManager {
             hasStrokes: this.strokes.some(s => s.type !== 'image-object'),
             strokeCount: this.strokes.filter(s => s.type !== 'image-object').length
         };
-    }
-    
-    // AI Upload Log methods
-    getUploadLog() {
-        return this.aiUploadHandler.getUploadLog();
-    }
-    
-    clearUploadLog() {
-        this.aiUploadHandler.clearUploadLog();
-    }
-    
-    exportUploadLog() {
-        return this.aiUploadHandler.exportUploadLog();
-    }
-    
-    downloadUploadLog() {
-        this.aiUploadHandler.downloadUploadLog();
     }
     
     // Scale interaction methods

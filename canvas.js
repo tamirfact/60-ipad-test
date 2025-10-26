@@ -59,31 +59,12 @@ class CanvasManager {
     }
     
     showToast(message, imageData = null) {
-        const toast = document.getElementById('toast');
-        const toastMessage = document.getElementById('toastMessage');
-        const toastImage = document.getElementById('toastImage');
-        
-        // Update message
-        toastMessage.textContent = message;
-        
-        // Handle image
-        if (imageData) {
-            toastImage.src = imageData;
-            toastImage.style.display = 'block';
+        // Use the global ToastManager
+        if (window.toastManager) {
+            window.toastManager.showToast(message, imageData);
         } else {
-            toastImage.style.display = 'none';
+            console.log('ToastManager not available:', message);
         }
-        
-        // Show toast
-        toast.classList.remove('toast-hidden');
-        toast.classList.add('toast-visible');
-        
-        // Hide after 3 seconds (longer for images)
-        const hideDelay = imageData ? 3000 : 1300;
-        setTimeout(() => {
-            toast.classList.remove('toast-visible');
-            toast.classList.add('toast-hidden');
-        }, hideDelay);
     }
     
     getPointFromEvent(event) {

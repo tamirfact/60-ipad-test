@@ -12,20 +12,7 @@ class AIGenerator {
             throw new Error('OpenAI API key not found. Please set it in env.js file.');
         }
         
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${this.apiKey}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                model: 'gpt-4o-mini',
-                messages: [{
-                    role: 'user',
-                    content: [
-                        {
-                            type: 'text',
-                            text: `Analyze the dragged content and canvas state to determine:
+        const prompt = `Analyze the dragged content and canvas state to determine:
 1. action_type: "generate" (new image from sketch), "update" (edit existing image), or "execute_action" (perform action like delete)
 2. image_prompt: Detailed prompt for image generation (if generate/update)
 3. description: What action is being performed
@@ -39,7 +26,27 @@ Context provided:
 - Image count: ${canvasContext.imageCount}
 - Stroke count: ${canvasContext.strokeCount}
 
-Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}`
+Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}`;
+
+        // Log the AI request with prompt
+        if (window.toastManager) {
+            window.toastManager.logAIRequest('Analyzing action...', imageData, prompt);
+        }
+        
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [{
+                    role: 'user',
+                    content: [
+                        {
+                            type: 'text',
+                            text: prompt
                         },
                         {
                             type: 'image_url',
@@ -83,11 +90,10 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
             // Capture the drawing as image (now async)
             const imageData = await this.captureSelectedStrokes(drawingManager, draggedStrokes);
             
-            // Show debug toast with captured image
-            drawingManager.canvasManager.showToast('Analyzing...', imageData);
-            
-            // Wait a moment to show the debug image
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Log AI request
+            if (window.toastManager) {
+                window.toastManager.logAIRequest('Analyzing drawing...', imageData);
+            }
             
             // Check if we have both strokes and images for the two-step process
             const hasImages = draggedStrokes.some(stroke => stroke.type === 'image-object');
@@ -116,7 +122,9 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
             
         } catch (error) {
             console.error('Error processing drawing:', error);
-            drawingManager.canvasManager.showToast('Processing failed');
+            if (window.toastManager) {
+                window.toastManager.logError('Processing failed', { error: error.message });
+            }
         }
     }
 
@@ -294,11 +302,18 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
         animateGeneration();
         
         // Show generating toast
-        drawingManager.canvasManager.showToast('Generating image...');
+        if (window.toastManager) {
+            window.toastManager.logInfo('Generating image...');
+        }
         
         try {
             // Create a realistic prompt based on the sketch
             const realisticPrompt = `Create a photorealistic, high-quality image based on this sketch. The sketch lines are artistic guidance and direction - not the actual image content. Use the sketch as inspiration to generate a realistic, professional image with proper lighting, shadows, and details. ${prompt}`;
+            
+            // Log the image generation request with prompt
+            if (window.toastManager) {
+                window.toastManager.logAIRequest('Generating image...', sketchImageData, realisticPrompt);
+            }
             
             await this.imageGenerator.generateImage(
                 realisticPrompt,
@@ -329,7 +344,9 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
                         
                         drawingManager.undoManager.save();
                         drawingManager.redraw();
-                        drawingManager.canvasManager.showToast('Image generated!');
+                        if (window.toastManager) {
+                            window.toastManager.logSuccess('Image generated!');
+                        }
                     };
                     img.src = `data:image/png;base64,${finalBase64}`;
                 },
@@ -343,7 +360,9 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
                 drawingManager.strokes.splice(index, 1);
             }
             drawingManager.redraw();
-            drawingManager.canvasManager.showToast('Image generation failed');
+            if (window.toastManager) {
+                window.toastManager.logError('Image generation failed');
+            }
         }
     }
     
@@ -351,7 +370,9 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
         // Find the image object to update
         const imageObj = draggedStrokes.find(stroke => stroke.type === 'image-object');
         if (!imageObj) {
-            drawingManager.canvasManager.showToast('No image found to update');
+            if (window.toastManager) {
+                window.toastManager.logError('No image found to update');
+            }
             return;
         }
         
@@ -378,7 +399,9 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
         };
         animateGeneration();
         
-        drawingManager.canvasManager.showToast('Updating image...');
+        if (window.toastManager) {
+            window.toastManager.logInfo('Updating image...');
+        }
         
         try {
             // Convert image to blob for editing
@@ -386,6 +409,11 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
             
             // Create enhanced prompt for image editing
             const enhancedPrompt = `Update this image based on the sketch guidance provided. The sketch lines are artistic direction and intent - not literal content to copy. Use the sketch as inspiration to modify the existing image while maintaining its realistic, professional quality. ${prompt}`;
+            
+            // Log the image editing request with prompt
+            if (window.toastManager) {
+                window.toastManager.logAIRequest('Editing image...', null, enhancedPrompt);
+            }
             
             await this.imageGenerator.editImage(
                 [imageBlob],
@@ -416,7 +444,9 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
                         
                         drawingManager.undoManager.save();
                         drawingManager.redraw();
-                        drawingManager.canvasManager.showToast('Image updated!');
+                        if (window.toastManager) {
+                            window.toastManager.logInfo('Image updated!');
+                        }
                     };
                     img.src = `data:image/png;base64,${finalBase64}`;
                 }
@@ -425,7 +455,9 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
             console.error('Image update failed:', error);
             imageObj.isGenerating = false;
             drawingManager.redraw();
-            drawingManager.canvasManager.showToast('Image update failed');
+            if (window.toastManager) {
+                            window.toastManager.logInfo('Image update failed');
+                        }
         }
     }
     
@@ -444,7 +476,9 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
             
             drawingManager.undoManager.save();
             drawingManager.redraw();
-            drawingManager.canvasManager.showToast('Items deleted');
+            if (window.toastManager) {
+                window.toastManager.logSuccess('Items deleted');
+            }
         }
     }
     
@@ -503,7 +537,9 @@ Examples: ["Add hat", "Change color", "Add background", "Make cartoon"]`
             
         } catch (error) {
             console.error('Error generating options:', error);
-            drawingManager.canvasManager.showToast('Failed to generate options');
+            if (window.toastManager) {
+                window.toastManager.logError('Failed to generate options');
+            }
         }
     }
     
@@ -551,7 +587,9 @@ Examples: ["Add hat", "Change color", "Add background", "Make cartoon"]`
         // Find the image object to edit
         const imageObj = draggedStrokes.find(stroke => stroke.type === 'image-object');
         if (!imageObj) {
-            drawingManager.canvasManager.showToast('No image found to edit');
+            if (window.toastManager) {
+                window.toastManager.logError('No image found to edit');
+            }
             return;
         }
         
@@ -578,7 +616,9 @@ Examples: ["Add hat", "Change color", "Add background", "Make cartoon"]`
         };
         animateGeneration();
         
-        drawingManager.canvasManager.showToast(`Applying: ${selectedOption}...`);
+        if (window.toastManager) {
+            window.toastManager.logInfo(`Applying: ${selectedOption}...`);
+        }
         
         try {
             // Convert image to blob for editing
@@ -586,6 +626,11 @@ Examples: ["Add hat", "Change color", "Add background", "Make cartoon"]`
             
             // Create enhanced prompt with selected option
             const enhancedPrompt = `Apply this edit to the image: "${selectedOption}". The sketch lines were artistic guidance for this specific edit. Make the change while maintaining realistic, professional quality.`;
+            
+            // Log the edit option selection with prompt
+            if (window.toastManager) {
+                window.toastManager.logAIRequest(`Applying: ${selectedOption}...`, null, enhancedPrompt);
+            }
             
             await this.imageGenerator.editImage(
                 [imageBlob],
@@ -616,7 +661,9 @@ Examples: ["Add hat", "Change color", "Add background", "Make cartoon"]`
                         
                         drawingManager.undoManager.save();
                         drawingManager.redraw();
-                        drawingManager.canvasManager.showToast('Image updated!');
+                        if (window.toastManager) {
+                            window.toastManager.logInfo('Image updated!');
+                        }
                     };
                     img.src = `data:image/png;base64,${finalBase64}`;
                 }
@@ -625,7 +672,9 @@ Examples: ["Add hat", "Change color", "Add background", "Make cartoon"]`
             console.error('Image update failed:', error);
             imageObj.isGenerating = false;
             drawingManager.redraw();
-            drawingManager.canvasManager.showToast('Image update failed');
+            if (window.toastManager) {
+                            window.toastManager.logInfo('Image update failed');
+                        }
         }
     }
 }

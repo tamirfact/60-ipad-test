@@ -5,22 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>iPad Drawing Pad Demo</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="toastManager.css">
         <script type="module" src="/main.js"></script>
 </head>
 <body>
     <canvas id="drawingCanvas"></canvas>
-        <div id="debugInfo">
-            <div>X: <span id="penX">0</span></div>
-            <div>Y: <span id="penY">0</span></div>
-            <div>Pressure: <span id="penPressure">0</span></div>
-            <div>Tilt X: <span id="penTiltX">0</span></div>
-            <div>Tilt Y: <span id="penTiltY">0</span></div>
-            <button id="clearButton">Clear</button>
-            <button id="downloadLogButton">Download AI Log</button>
-        </div>
-    <div id="toast" class="toast-hidden">
-        <span id="toastMessage">Undo</span>
-        <img id="toastImage" class="toast-image" style="display: none;" />
+    <div id="debugInfo">
+        <div>X: <span id="penX">0</span></div>
+        <div>Y: <span id="penY">0</span></div>
+        <div>Pressure: <span id="penPressure">0</span></div>
+        <div>Tilt X: <span id="penTiltX">0</span></div>
+        <div>Tilt Y: <span id="penTiltY">0</span></div>
+        <button id="clearButton">Clear</button>
     </div>
         <div id="dropZone" class="drop-zone-hidden"></div>
         <div id="editOptions" class="edit-options-hidden">
