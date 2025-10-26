@@ -5,35 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>iPad Drawing Pad Demo</title>
     <link rel="stylesheet" href="styles.css">
-        <script src="simpleUndo.js"></script>
-        <script src="env.js"></script>
-
-        <script>
-            // Debug: Check what's loaded
-            console.log('After loading simple-undo:');
-            console.log('SimpleUndo defined:', typeof SimpleUndo !== 'undefined');
-            console.log('Available globals:', Object.keys(window).filter(key => key.includes('Undo') || key.includes('undo')));
-        </script>
-        <script src="canvas.js"></script>
-        <script src="imageGen.js"></script>
-        <script src="ai.js"></script>
-        <script src="draw.js"></script>
-        <script src="app.js"></script>
+        <script type="module" src="/main.js"></script>
 </head>
 <body>
     <canvas id="drawingCanvas"></canvas>
-    <div id="debugInfo">
-        <div>X: <span id="penX">0</span></div>
-        <div>Y: <span id="penY">0</span></div>
-        <div>Pressure: <span id="penPressure">0</span></div>
-        <div>Tilt X: <span id="penTiltX">0</span></div>
-        <div>Tilt Y: <span id="penTiltY">0</span></div>
-        <button id="clearButton">Clear</button>
-    </div>
+        <div id="debugInfo">
+            <div>X: <span id="penX">0</span></div>
+            <div>Y: <span id="penY">0</span></div>
+            <div>Pressure: <span id="penPressure">0</span></div>
+            <div>Tilt X: <span id="penTiltX">0</span></div>
+            <div>Tilt Y: <span id="penTiltY">0</span></div>
+            <button id="clearButton">Clear</button>
+            <button id="downloadLogButton">Download AI Log</button>
+        </div>
     <div id="toast" class="toast-hidden">
         <span id="toastMessage">Undo</span>
         <img id="toastImage" class="toast-image" style="display: none;" />
     </div>
         <div id="dropZone" class="drop-zone-hidden"></div>
-</body>
-</html>
+        <div id="editOptions" class="edit-options-hidden">
+            <div class="edit-options-header">
+                <span>Choose how to edit the image:</span>
+                <button id="dismissOptions" class="dismiss-btn">×</button>
+            </div>
+            <div id="editChips" class="edit-chips"></div>
+        </div>
+    </body>
+    </html>

@@ -6,48 +6,21 @@ class ImageGenerator {
     
     async generateImage(prompt, onPartialImage, onComplete, sketchImageData = null) {
         try {
-            let response;
-            
-            if (sketchImageData) {
-                // Use new API with image input for sketch-based generation
-                response = await fetch('https://api.openai.com/v1/responses', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${this.apiKey}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        model: 'gpt-4.1',
-                        input: [
-                            {
-                                role: 'user',
-                                content: [
-                                    { type: 'input_text', text: prompt },
-                                    {
-                                        type: 'input_image',
-                                        image_url: sketchImageData
-                                    }
-                                ]
-                            }
-                        ],
-                        tools: [{ type: 'image_generation' }]
-                    })
-                });
-            } else {
-                // Use new API for text-only generation
-                response = await fetch('https://api.openai.com/v1/responses', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${this.apiKey}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        model: 'gpt-5',
-                        input: prompt,
-                        tools: [{ type: 'image_generation' }]
-                    })
-                });
-            }
+            // Use GPT Image 1 for fastest generation with lowest quality
+            const response = await fetch('https://api.openai.com/v1/images/generations', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: 'gpt-image-1',
+                    prompt: prompt,
+                    size: '1024x1024',
+                    quality: 'low',
+                    n: 1
+                })
+            });
 
             if (!response.ok) {
                 throw new Error(`Image generation failed: ${response.status} ${response.statusText}`);
@@ -55,13 +28,9 @@ class ImageGenerator {
 
             const result = await response.json();
             
-            // Extract image data from response
-            const imageData = result.output
-                .filter((output) => output.type === 'image_generation_call')
-                .map((output) => output.result);
-
-            if (imageData.length > 0) {
-                const imageBase64 = imageData[0];
+            // Extract image data from response (GPT Image 1 format)
+            if (result.data && result.data.length > 0) {
+                const imageBase64 = result.data[0].b64_json;
                 onComplete(imageBase64);
             } else {
                 throw new Error('No image generated');
@@ -74,39 +43,27 @@ class ImageGenerator {
     
     async editImage(images, prompt, onPartialImage, onComplete) {
         try {
-            // Convert images to base64 data URLs
-            const imageInputs = images.map(imageBlob => {
-                return new Promise((resolve) => {
-                    const reader = new FileReader();
-                    reader.onload = () => resolve(reader.result);
-                    reader.readAsDataURL(imageBlob);
-                });
-            });
+            // Use GPT Image 1 for image editing with smallest size and lowest quality
+            const formData = new FormData();
+            formData.append('model', 'gpt-image-1');
+            formData.append('prompt', prompt);
+            formData.append('size', '1024x1024');
+            formData.append('quality', 'low');
+            formData.append('n', '1');
             
-            const imageDataUrls = await Promise.all(imageInputs);
+            // Add only the first image (edits endpoint expects single 'image' parameter)
+            if (images.length > 0) {
+                formData.append('image', images[0], 'image.png');
+            } else {
+                throw new Error('No image provided for editing');
+            }
             
-            const response = await fetch('https://api.openai.com/v1/responses', {
+            const response = await fetch('https://api.openai.com/v1/images/edits', {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${this.apiKey}`,
-                    'Content-Type': 'application/json'
+                    'Authorization': `Bearer ${this.apiKey}`
                 },
-                body: JSON.stringify({
-                    model: 'gpt-4.1',
-                    input: [
-                        {
-                            role: 'user',
-                            content: [
-                                { type: 'input_text', text: prompt },
-                                ...imageDataUrls.map(url => ({
-                                    type: 'input_image',
-                                    image_url: url
-                                }))
-                            ]
-                        }
-                    ],
-                    tools: [{ type: 'image_generation' }]
-                })
+                body: formData
             });
 
             if (!response.ok) {
@@ -115,13 +72,9 @@ class ImageGenerator {
 
             const result = await response.json();
             
-            // Extract image data from response
-            const imageData = result.output
-                .filter((output) => output.type === 'image_generation_call')
-                .map((output) => output.result);
-
-            if (imageData.length > 0) {
-                const imageBase64 = imageData[0];
+            // Extract image data from response (GPT Image 1 format)
+            if (result.data && result.data.length > 0) {
+                const imageBase64 = result.data[0].b64_json;
                 onComplete(imageBase64);
             } else {
                 throw new Error('No image generated');
@@ -143,3 +96,5 @@ class ImageGenerator {
         return new Blob([byteArray], { type: 'image/png' });
     }
 }
+
+export { ImageGenerator };

@@ -134,6 +134,7 @@ body {
 }
 
 #dropZone.drop-zone-visible {
+    /* opacity is controlled by fade classes */
 }
 
 #dropZone.drag-over {
@@ -159,4 +160,86 @@ body {
     0% { opacity: 0.5; }
     50% { opacity: 1; }
     100% { opacity: 0.5; }
+}
+
+/* Edit Options Panel */
+#editOptions {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid #E0E0E0;
+    padding: 20px;
+    z-index: 2000;
+    transform: translateY(100%);
+    transition: transform 0.3s ease-in-out;
+}
+
+#editOptions.edit-options-visible {
+    transform: translateY(0);
+}
+
+.edit-options-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    font-weight: 600;
+    color: #333;
+}
+
+.dismiss-btn {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: #666;
+    cursor: pointer;
+    padding: 5px;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dismiss-btn:hover {
+    background: #F0F0F0;
+    color: #333;
+}
+
+.edit-chips {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.edit-chip {
+    background: #007AFF;
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.edit-chip:hover {
+    background: #0056CC;
+    transform: translateY(-1px);
+}
+
+.edit-chip:active {
+    transform: translateY(0);
+    background: #004499;
+}
+
+@keyframes longTapPulse {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
 }

@@ -1,3 +1,7 @@
+import { AIGenerator } from './ai.js';
+import { ImageGenerator } from './imageGen.js';
+import { AIUploadHandler } from './aiUploadHandler.js';
+
 class DrawingManager {
     constructor(canvas, ctx, canvasManager) {
         this.canvas = canvas;
@@ -41,9 +45,27 @@ class DrawingManager {
         
         // Image object cache for performance
         this.imageCache = new Map();
+        
+        // Scale interaction state
+        this.isScaling = false;
+        this.scaleStartDistance = 0;
+        this.scaleStartWidth = 0;
+        this.scaleStartHeight = 0;
+        this.scaleTarget = null; // The object being scaled
+
+        // Long-tap state management
+        this.longTapTimer = null;
+        this.longTapProgressTimer = null;
+        this.longTapStartPoint = null;
+        this.isLongTapping = false;
+        this.showLongTapProgress = false;
+        this.longTapStartTime = null;
 
         // AI generator
         this.aiGenerator = new AIGenerator();
+        
+        // AI upload handler
+        this.aiUploadHandler = new AIUploadHandler(this.aiGenerator);
 
         this.setupEventListeners();
     }
@@ -65,6 +87,26 @@ class DrawingManager {
                 this.redraw();
             });
         };
+        
+        // Touch events for scaling
+        this.canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                this.handleScaleStart(e);
+            }
+        });
+        
+        this.canvas.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2) {
+                e.preventDefault(); // Prevent scrolling
+                this.handleScaleMove(e);
+            }
+        });
+        
+        this.canvas.addEventListener('touchend', (e) => {
+            if (this.isScaling && e.touches.length < 2) {
+                this.handleScaleEnd();
+            }
+        });
     }
     
     handlePointerDown(e) {
@@ -81,16 +123,18 @@ class DrawingManager {
             if (this.selectedStroke) {
                 // Check if this stroke is already selected by lasso
                 if (this.selectedStrokes.includes(this.selectedStroke)) {
-                    // Start dragging all selected strokes
+                    // Start long-tap for AI processing on already-selected strokes
                     this.draggedStrokes = [...this.selectedStrokes];
+                    this.startLongTap(point);
                 } else {
                     // Clear lasso selection and select single stroke
                     this.clearLassoSelection();
                     this.selectedStroke.selected = true;
                     this.draggedStrokes = [this.selectedStroke];
+                    this.startLongTap(point);
                 }
                 this.redraw();
-                this.startDragging(point);
+                // Do NOT start dragging immediately - wait for long-tap
             } else {
                 // Clear all selections if clicking empty space
                 this.clearAllSelections();
@@ -107,6 +151,17 @@ class DrawingManager {
         
         if (this.isDrawing && e.pointerType === 'pen') {
             this.continueDrawing(point, e);
+        } else if (this.isLongTapping && e.pointerType === 'touch') {
+            // Check movement tolerance for long-tap
+            const distance = Math.sqrt(
+                Math.pow(point.x - this.longTapStartPoint.x, 2) + 
+                Math.pow(point.y - this.longTapStartPoint.y, 2)
+            );
+            if (distance > 10) {
+                // Cancel long-tap and start dragging
+                this.cancelLongTap();
+                this.startDragging(point);
+            }
         } else if (this.isDragging && e.pointerType === 'touch' && this.selectedStroke) {
             this.continueDragging(point);
         } else if (this.isLassoSelecting && e.pointerType === 'touch') {
@@ -117,7 +172,12 @@ class DrawingManager {
     handlePointerUp(e) {
         e.preventDefault();
         
-        if (this.isDrawing) {
+        if (this.isLongTapping) {
+            // Clean up long-tap
+            this.cancelLongTap();
+            // If finger was held for less than 3 seconds, start dragging behavior
+            this.startDragging(this.longTapStartPoint);
+        } else if (this.isDrawing) {
             this.finishDrawing();
         } else if (this.isDragging) {
             this.finishDragging();
@@ -126,6 +186,55 @@ class DrawingManager {
         }
     }
     
+    startLongTap(point) {
+        this.longTapStartPoint = point;
+        this.isLongTapping = true;
+        this.longTapStartTime = Date.now();
+        
+        // Start 2-second timer for visual feedback
+        this.longTapProgressTimer = setTimeout(() => {
+            this.showLongTapProgress = true;
+            this.startProgressAnimation();
+        }, 2000);
+        
+        // Start 3-second timer for AI processing
+        this.longTapTimer = setTimeout(() => {
+            this.triggerLongTapAI();
+        }, 3000);
+    }
+
+    cancelLongTap() {
+        if (this.longTapTimer) {
+            clearTimeout(this.longTapTimer);
+            this.longTapTimer = null;
+        }
+        if (this.longTapProgressTimer) {
+            clearTimeout(this.longTapProgressTimer);
+            this.longTapProgressTimer = null;
+        }
+        this.isLongTapping = false;
+        this.showLongTapProgress = false;
+        this.redraw();
+    }
+
+    startProgressAnimation() {
+        const animate = () => {
+            if (this.showLongTapProgress && this.isLongTapping) {
+                this.redraw();
+                requestAnimationFrame(animate);
+            }
+        };
+        animate();
+    }
+
+    triggerLongTapAI() {
+        this.isLongTapping = false;
+        this.showLongTapProgress = false;
+        
+        // Use AIUploadHandler for consistent behavior and logging
+        this.aiUploadHandler.handleAIUpload(this, this.draggedStrokes, 'long-tap');
+    }
+
     startDrawing(point, event) {
         this.isDrawing = true;
         this.currentStroke = {
@@ -364,6 +473,61 @@ class DrawingManager {
         this.ctx.stroke();
         this.ctx.restore();
     }
+
+    drawLongTapProgress() {
+        if (!this.showLongTapProgress || !this.draggedStrokes.length) return;
+        
+        // Calculate center point of all selected strokes/images
+        let centerX = 0, centerY = 0, count = 0;
+        
+        this.draggedStrokes.forEach(stroke => {
+            if (stroke.type === 'image-object') {
+                centerX += stroke.position.x;
+                centerY += stroke.position.y;
+                count++;
+            } else if (stroke.points && stroke.points.length > 0) {
+                stroke.points.forEach(point => {
+                    centerX += point.x;
+                    centerY += point.y;
+                    count++;
+                });
+            }
+        });
+        
+        if (count === 0) return;
+        
+        centerX /= count;
+        centerY /= count;
+        
+        // Calculate progress based on elapsed time since 2-second mark
+        const elapsed = Date.now() - this.longTapStartTime - 2000; // Time since 2s mark
+        const progress = Math.min(Math.max(elapsed / 1000, 0), 1); // Progress from 0 to 1 over 1 second
+        
+        this.ctx.save();
+        this.ctx.strokeStyle = '#007AFF';
+        this.ctx.lineWidth = 6;
+        this.ctx.lineCap = 'round';
+        this.ctx.globalAlpha = 0.8;
+        
+        const radius = 40;
+        const startAngle = -Math.PI / 2; // Start at top
+        const endAngle = startAngle + (progress * 2 * Math.PI);
+        
+        // Draw background circle
+        this.ctx.beginPath();
+        this.ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+        this.ctx.strokeStyle = '#E0E0E0';
+        this.ctx.lineWidth = 4;
+        this.ctx.stroke();
+        
+        // Draw progress arc
+        this.ctx.beginPath();
+        this.ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+        this.ctx.strokeStyle = '#007AFF';
+        this.ctx.lineWidth = 6;
+        this.ctx.stroke();
+        this.ctx.restore();
+    }
     
     drawImageObject(imageObj) {
         this.ctx.save();
@@ -414,18 +578,31 @@ class DrawingManager {
 
         // Draw loading indicator if generating
         if (imageObj.isGenerating) {
+            // Add pulsing animation to the entire image square
+            const time = Date.now() * 0.003; // Slow animation
+            const pulseScale = 1 + Math.sin(time) * 0.1; // Scale between 0.9 and 1.1
+            
+            this.ctx.save();
+            this.ctx.translate(imageObj.position.x, imageObj.position.y);
+            this.ctx.scale(pulseScale, pulseScale);
+            this.ctx.translate(-imageObj.position.x, -imageObj.position.y);
+            
+            // Draw animated background
             this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
             this.ctx.fillRect(x, y, imageObj.width, imageObj.height);
             
+            // Draw text without animation
             this.ctx.fillStyle = 'white';
             this.ctx.font = '16px Arial, sans-serif';
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'middle';
             this.ctx.fillText(
-                `Generating... ${imageObj.currentFrame + 1}/2`,
+                'Generating...',
                 imageObj.position.x,
                 imageObj.position.y
             );
+            
+            this.ctx.restore();
         }
 
         this.ctx.restore();
@@ -449,19 +626,29 @@ class DrawingManager {
     
     redraw() {
         this.canvasManager.redraw(() => {
-            // Draw lasso selection if active
+            // First, draw all image objects (background layer)
+            this.strokes.forEach(stroke => {
+                if (stroke.type === 'image-object') {
+                    this.drawImageObject(stroke);
+                }
+            });
+            
+            // Then, draw all strokes on top (foreground layer)
+            this.strokes.forEach(stroke => {
+                if (stroke.type !== 'image-object' && stroke.points && stroke.points.length > 1) {
+                    this.drawStrokeSegment(stroke);
+                }
+            });
+            
+            // Finally, draw lasso selection on top of everything
             if (this.isLassoSelecting && this.lassoPoints.length > 1) {
                 this.drawLassoSelection();
             }
             
-            // Redraw all strokes and image objects
-            this.strokes.forEach(stroke => {
-                if (stroke.type === 'image-object') {
-                    this.drawImageObject(stroke);
-                } else if (stroke.points && stroke.points.length > 1) {
-                    this.drawStrokeSegment(stroke);
-                }
-            });
+            // Draw long-tap progress indicator on top of everything
+            if (this.showLongTapProgress) {
+                this.drawLongTapProgress();
+            }
         });
     }
     
@@ -542,8 +729,8 @@ class DrawingManager {
             // Check if any point of the stroke is inside the lasso polygon
             let isInside = false;
             
-            if (stroke.type === 'smart-object') {
-                // For smart objects, check if center is in lasso
+            if (stroke.type === 'image-object') {
+                // For image objects, check if center is in lasso
                 if (this.isPointInPolygon(stroke.position, lassoPoints)) {
                     isInside = true;
                 }
@@ -696,7 +883,8 @@ class DrawingManager {
     }
     
     async handleDropZoneDrop() {
-        await this.aiGenerator.processDrawing(this, this.draggedStrokes);
+        // Use AIUploadHandler for consistent behavior and logging
+        await this.aiUploadHandler.handleAIUpload(this, this.draggedStrokes, 'drag-to-corner');
     }
     
     getCanvasContext() {
@@ -708,5 +896,147 @@ class DrawingManager {
         };
     }
     
+    // AI Upload Log methods
+    getUploadLog() {
+        return this.aiUploadHandler.getUploadLog();
+    }
     
+    clearUploadLog() {
+        this.aiUploadHandler.clearUploadLog();
+    }
+    
+    exportUploadLog() {
+        return this.aiUploadHandler.exportUploadLog();
+    }
+    
+    downloadUploadLog() {
+        this.aiUploadHandler.downloadUploadLog();
+    }
+    
+    // Scale interaction methods
+    handleScaleStart(e) {
+        if (e.touches.length !== 2) return;
+        
+        const touch1 = e.touches[0];
+        const touch2 = e.touches[1];
+        
+        // Calculate distance between touches
+        const distance = Math.sqrt(
+            Math.pow(touch2.clientX - touch1.clientX, 2) + 
+            Math.pow(touch2.clientY - touch1.clientY, 2)
+        );
+        
+        // Find what's under the center of the pinch
+        const centerX = (touch1.clientX + touch2.clientX) / 2;
+        const centerY = (touch1.clientY + touch2.clientY) / 2;
+        const point = this.canvasManager.getPointFromEvent({ clientX: centerX, clientY: centerY });
+        
+        const target = this.findStrokeAtPoint(point);
+        
+        if (target && (target.type === 'image-object' || target.selected)) {
+            this.isScaling = true;
+            this.scaleStartDistance = distance;
+            this.scaleTarget = target;
+            
+            if (target.type === 'image-object') {
+                this.scaleStartWidth = target.width;
+                this.scaleStartHeight = target.height;
+            }
+        }
+    }
+    
+    handleScaleMove(e) {
+        if (!this.isScaling || e.touches.length !== 2) return;
+        
+        const touch1 = e.touches[0];
+        const touch2 = e.touches[1];
+        
+        // Calculate current distance
+        const currentDistance = Math.sqrt(
+            Math.pow(touch2.clientX - touch1.clientX, 2) + 
+            Math.pow(touch2.clientY - touch1.clientY, 2)
+        );
+        
+        // Calculate scale factor
+        const scaleFactor = currentDistance / this.scaleStartDistance;
+        
+        if (this.scaleTarget) {
+            if (this.scaleTarget.type === 'image-object') {
+                // Scale image object
+                const newWidth = this.scaleStartWidth * scaleFactor;
+                const newHeight = this.scaleStartHeight * scaleFactor;
+                
+                // Apply minimum and maximum size constraints
+                const minSize = 50;
+                const maxSize = 1000;
+                
+                this.scaleTarget.width = Math.max(minSize, Math.min(maxSize, newWidth));
+                this.scaleTarget.height = Math.max(minSize, Math.min(maxSize, newHeight));
+            } else if (this.scaleTarget.selected) {
+                // Scale selected strokes
+                this.scaleSelectedStrokes(scaleFactor);
+            }
+            
+            this.redraw();
+        }
+    }
+    
+    handleScaleEnd() {
+        if (this.isScaling) {
+            this.isScaling = false;
+            this.scaleTarget = null;
+            this.undoManager.save(); // Save state after scaling
+        }
+    }
+    
+    scaleSelectedStrokes(scaleFactor) {
+        // Find center of all selected strokes
+        let centerX = 0, centerY = 0, count = 0;
+        
+        this.strokes.forEach(stroke => {
+            if (stroke.selected) {
+                if (stroke.type === 'image-object') {
+                    centerX += stroke.position.x;
+                    centerY += stroke.position.y;
+                    count++;
+                } else if (stroke.points) {
+                    stroke.points.forEach(point => {
+                        centerX += point.x;
+                        centerY += point.y;
+                        count++;
+                    });
+                }
+            }
+        });
+        
+        if (count === 0) return;
+        
+        centerX /= count;
+        centerY /= count;
+        
+        // Scale all selected strokes around the center
+        this.strokes.forEach(stroke => {
+            if (stroke.selected) {
+                if (stroke.type === 'image-object') {
+                    // Scale image object
+                    const newWidth = stroke.width * scaleFactor;
+                    const newHeight = stroke.height * scaleFactor;
+                    
+                    const minSize = 50;
+                    const maxSize = 1000;
+                    
+                    stroke.width = Math.max(minSize, Math.min(maxSize, newWidth));
+                    stroke.height = Math.max(minSize, Math.min(maxSize, newHeight));
+                } else if (stroke.points) {
+                    // Scale stroke points
+                    stroke.points = stroke.points.map(point => ({
+                        x: centerX + (point.x - centerX) * scaleFactor,
+                        y: centerY + (point.y - centerY) * scaleFactor
+                    }));
+                }
+            }
+        });
+    }
 }
+
+export { DrawingManager };

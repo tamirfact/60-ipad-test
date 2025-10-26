@@ -1,3 +1,5 @@
+import { ImageGenerator } from './imageGen.js';
+
 // AI Generation Logic for Image Generation
 class AIGenerator {
     constructor() {
@@ -27,6 +29,8 @@ class AIGenerator {
 1. action_type: "generate" (new image from sketch), "update" (edit existing image), or "execute_action" (perform action like delete)
 2. image_prompt: Detailed prompt for image generation (if generate/update)
 3. description: What action is being performed
+
+IMPORTANT: The sketch lines are artistic guidance and direction - not literal content to copy. They represent the user's intent and artistic vision, not the actual image content.
 
 Context provided:
 - Dragged content type: ${contentType}
@@ -76,8 +80,8 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
             const contentType = this.analyzeContent(draggedStrokes);
             const canvasContext = drawingManager.getCanvasContext();
             
-            // Capture the drawing as image
-            const imageData = this.captureSelectedStrokes(drawingManager, draggedStrokes);
+            // Capture the drawing as image (now async)
+            const imageData = await this.captureSelectedStrokes(drawingManager, draggedStrokes);
             
             // Show debug toast with captured image
             drawingManager.canvasManager.showToast('Analyzing...', imageData);
@@ -85,20 +89,29 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
             // Wait a moment to show the debug image
             await new Promise(resolve => setTimeout(resolve, 2000));
             
-            // Analyze action
-            const action = await this.analyzeAction(imageData, contentType, canvasContext);
+            // Check if we have both strokes and images for the two-step process
+            const hasImages = draggedStrokes.some(stroke => stroke.type === 'image-object');
+            const hasStrokes = draggedStrokes.some(stroke => stroke.type !== 'image-object');
             
-            // Execute based on action type
-            switch(action.action_type) {
-                case 'generate':
-                    await this.generateNewImage(drawingManager, action.image_prompt, imageData);
-                    break;
-                case 'update':
-                    await this.updateExistingImage(drawingManager, action.image_prompt, draggedStrokes);
-                    break;
-                case 'execute_action':
-                    await this.executeCustomAction(drawingManager, action, draggedStrokes);
-                    break;
+            if (hasImages && hasStrokes) {
+                // Two-step process: generate options first
+                await this.generateEditOptions(drawingManager, imageData, draggedStrokes);
+            } else {
+                // Single-step process: direct action
+                const action = await this.analyzeAction(imageData, contentType, canvasContext);
+                
+                // Execute based on action type
+                switch(action.action_type) {
+                    case 'generate':
+                        await this.generateNewImage(drawingManager, action.image_prompt, imageData);
+                        break;
+                    case 'update':
+                        await this.updateExistingImage(drawingManager, action.image_prompt, draggedStrokes);
+                        break;
+                    case 'execute_action':
+                        await this.executeCustomAction(drawingManager, action, draggedStrokes);
+                        break;
+                }
             }
             
         } catch (error) {
@@ -107,7 +120,7 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
         }
     }
 
-    captureSelectedStrokes(drawingManager, draggedStrokes) {
+    async captureSelectedStrokes(drawingManager, draggedStrokes) {
         // Create temporary canvas
         const tempCanvas = document.createElement('canvas');
         const tempCtx = tempCanvas.getContext('2d');
@@ -155,23 +168,58 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
         tempCtx.lineWidth = 1;
         tempCtx.strokeRect(0, 0, width, height);
         
-        // Draw selected strokes
+        // Create a promise to wait for all images to load
+        const imagePromises = [];
+        
+        // First, draw all images (background layer)
         draggedStrokes.forEach(stroke => {
             if (stroke.type === 'image-object') {
                 // Draw image object
                 if (stroke.imageData) {
                     const img = new Image();
-                    img.onload = () => {
-                        const x = stroke.position.x - minX + 40 - stroke.width / 2;
-                        const y = stroke.position.y - minY + 40 - stroke.height / 2;
-                        tempCtx.drawImage(img, x, y, stroke.width, stroke.height);
-                    };
-                    img.src = `data:image/png;base64,${stroke.imageData}`;
+                    const imagePromise = new Promise((resolve) => {
+                        img.onload = () => {
+                            const x = stroke.position.x - minX + 40 - stroke.width / 2;
+                            const y = stroke.position.y - minY + 40 - stroke.height / 2;
+                            
+                            // Draw white border for image
+                            tempCtx.fillStyle = 'white';
+                            tempCtx.fillRect(x - 10, y - 10, stroke.width + 20, stroke.height + 20);
+                            
+                            // Draw shadow
+                            tempCtx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+                            tempCtx.shadowBlur = 15;
+                            tempCtx.shadowOffsetX = 5;
+                            tempCtx.shadowOffsetY = 5;
+                            
+                            // Draw image
+                            tempCtx.drawImage(img, x, y, stroke.width, stroke.height);
+                            
+                            // Reset shadow
+                            tempCtx.shadowColor = 'transparent';
+                            tempCtx.shadowBlur = 0;
+                            tempCtx.shadowOffsetX = 0;
+                            tempCtx.shadowOffsetY = 0;
+                            
+                            resolve();
+                        };
+                        img.src = `data:image/png;base64,${stroke.imageData}`;
+                    });
+                    imagePromises.push(imagePromise);
                 }
-            } else if (stroke.points && stroke.points.length > 1) {
+            }
+        });
+        
+        // Wait for all images to load first
+        await Promise.all(imagePromises);
+        
+        // Then draw all strokes on top (foreground layer)
+        draggedStrokes.forEach(stroke => {
+            if (stroke.type !== 'image-object' && stroke.points && stroke.points.length > 1) {
                 // Draw regular stroke with pressure-based line width
                 tempCtx.lineCap = 'round';
                 tempCtx.lineJoin = 'round';
+                tempCtx.strokeStyle = '#000000'; // Ensure black color
                 
                 // Draw each segment with its own pressure
                 for (let i = 1; i < stroke.points.length; i++) {
@@ -191,6 +239,7 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
             }
         });
         
+        // Return the final composition
         return tempCanvas.toDataURL('image/png');
     }
 
@@ -235,12 +284,21 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
         drawingManager.strokes.push(imageObj);
         drawingManager.redraw();
         
+        // Start animation loop for generating state
+        const animateGeneration = () => {
+            if (imageObj.isGenerating) {
+                drawingManager.redraw();
+                requestAnimationFrame(animateGeneration);
+            }
+        };
+        animateGeneration();
+        
         // Show generating toast
         drawingManager.canvasManager.showToast('Generating image...');
         
         try {
             // Create a realistic prompt based on the sketch
-            const realisticPrompt = `Create a photorealistic, high-quality image based on this sketch. Make it look professional and realistic with proper lighting, shadows, and details. ${prompt}`;
+            const realisticPrompt = `Create a photorealistic, high-quality image based on this sketch. The sketch lines are artistic guidance and direction - not the actual image content. Use the sketch as inspiration to generate a realistic, professional image with proper lighting, shadows, and details. ${prompt}`;
             
             await this.imageGenerator.generateImage(
                 realisticPrompt,
@@ -248,17 +306,32 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
                     // Not used for single image
                 },
                 (finalBase64) => {
-                    // Update final image
+                    // Update final image and resize to match actual proportions
                     imageObj.imageData = finalBase64;
                     imageObj.isGenerating = false;
-                    drawingManager.undoManager.save();
-                    drawingManager.redraw();
-                    drawingManager.canvasManager.showToast('Image generated!');
                     
-                    // Force another redraw after a short delay to ensure image loads
-                    setTimeout(() => {
+                    // Load the image to get its actual dimensions
+                    const img = new Image();
+                    img.onload = () => {
+                        // Calculate new dimensions maintaining aspect ratio
+                        const maxSize = 512;
+                        const aspectRatio = img.width / img.height;
+                        
+                        if (aspectRatio > 1) {
+                            // Landscape
+                            imageObj.width = maxSize;
+                            imageObj.height = maxSize / aspectRatio;
+                        } else {
+                            // Portrait or square
+                            imageObj.height = maxSize;
+                            imageObj.width = maxSize * aspectRatio;
+                        }
+                        
+                        drawingManager.undoManager.save();
                         drawingManager.redraw();
-                    }, 100);
+                        drawingManager.canvasManager.showToast('Image generated!');
+                    };
+                    img.src = `data:image/png;base64,${finalBase64}`;
                 },
                 sketchImageData
             );
@@ -296,29 +369,56 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
         imageObj.currentFrame = 0;
         drawingManager.redraw();
         
+        // Start animation loop for generating state
+        const animateGeneration = () => {
+            if (imageObj.isGenerating) {
+                drawingManager.redraw();
+                requestAnimationFrame(animateGeneration);
+            }
+        };
+        animateGeneration();
+        
         drawingManager.canvasManager.showToast('Updating image...');
         
         try {
             // Convert image to blob for editing
             const imageBlob = this.imageGenerator.base64ToBlob(imageObj.imageData);
             
+            // Create enhanced prompt for image editing
+            const enhancedPrompt = `Update this image based on the sketch guidance provided. The sketch lines are artistic direction and intent - not literal content to copy. Use the sketch as inspiration to modify the existing image while maintaining its realistic, professional quality. ${prompt}`;
+            
             await this.imageGenerator.editImage(
                 [imageBlob],
-                prompt,
+                enhancedPrompt,
                 (partialBase64, frameIndex) => {
                     // Not used for single image
                 },
                 (finalBase64) => {
                     imageObj.imageData = finalBase64;
                     imageObj.isGenerating = false;
-                    drawingManager.undoManager.save();
-                    drawingManager.redraw();
-                    drawingManager.canvasManager.showToast('Image updated!');
                     
-                    // Force another redraw after a short delay to ensure image loads
-                    setTimeout(() => {
+                    // Load the image to get its actual dimensions
+                    const img = new Image();
+                    img.onload = () => {
+                        // Calculate new dimensions maintaining aspect ratio
+                        const maxSize = 512;
+                        const aspectRatio = img.width / img.height;
+                        
+                        if (aspectRatio > 1) {
+                            // Landscape
+                            imageObj.width = maxSize;
+                            imageObj.height = maxSize / aspectRatio;
+                        } else {
+                            // Portrait or square
+                            imageObj.height = maxSize;
+                            imageObj.width = maxSize * aspectRatio;
+                        }
+                        
+                        drawingManager.undoManager.save();
                         drawingManager.redraw();
-                    }, 100);
+                        drawingManager.canvasManager.showToast('Image updated!');
+                    };
+                    img.src = `data:image/png;base64,${finalBase64}`;
                 }
             );
         } catch (error) {
@@ -347,4 +447,187 @@ Return JSON: {"action_type": "...", "image_prompt": "...", "description": "..."}
             drawingManager.canvasManager.showToast('Items deleted');
         }
     }
+    
+    async generateEditOptions(drawingManager, imageData, draggedStrokes) {
+        try {
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: 'gpt-4o-mini',
+                    messages: [{
+                        role: 'user',
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Analyze this image with sketch overlays. The sketch lines are artistic guidance for editing the existing image. Generate 2-4 specific, actionable edit options that the user might want to apply to the image. Each option should be a clear, concise instruction (1-3 words) that describes what to do to the image.
+
+Return JSON array: ["option1", "option2", "option3", "option4"]
+
+Examples: ["Add hat", "Change color", "Add background", "Make cartoon"]`
+                            },
+                            {
+                                type: 'image_url',
+                                image_url: { 
+                                    url: imageData,
+                                    detail: 'low'
+                                }
+                            }
+                        ]
+                    }],
+                    response_format: { type: "json_object" }
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            const content = result.choices[0].message.content;
+            
+            let options;
+            try {
+                const parsed = JSON.parse(content);
+                options = parsed.options || parsed; // Handle different response formats
+            } catch (e) {
+                console.error('Failed to parse options:', content);
+                options = ["Add details", "Change style", "Add effects", "Modify colors"];
+            }
+            
+            // Show options to user
+            this.showEditOptions(drawingManager, options, draggedStrokes);
+            
+        } catch (error) {
+            console.error('Error generating options:', error);
+            drawingManager.canvasManager.showToast('Failed to generate options');
+        }
+    }
+    
+    showEditOptions(drawingManager, options, draggedStrokes) {
+        const editOptions = document.getElementById('editOptions');
+        const editChips = document.getElementById('editChips');
+        const dismissBtn = document.getElementById('dismissOptions');
+        
+        // Clear existing chips
+        editChips.innerHTML = '';
+        
+        // Create chips for each option
+        options.forEach((option, index) => {
+            const chip = document.createElement('button');
+            chip.className = 'edit-chip';
+            chip.textContent = option;
+            chip.onclick = () => this.selectEditOption(drawingManager, option, draggedStrokes);
+            editChips.appendChild(chip);
+        });
+        
+        // Show the options panel
+        editOptions.classList.remove('edit-options-hidden');
+        editOptions.classList.add('edit-options-visible');
+        
+        // Handle dismiss button
+        dismissBtn.onclick = () => {
+            this.hideEditOptions();
+        };
+        
+        // Store current state for later use
+        this.pendingEditOptions = { drawingManager, draggedStrokes };
+    }
+    
+    hideEditOptions() {
+        const editOptions = document.getElementById('editOptions');
+        editOptions.classList.remove('edit-options-visible');
+        editOptions.classList.add('edit-options-hidden');
+        this.pendingEditOptions = null;
+    }
+    
+    async selectEditOption(drawingManager, selectedOption, draggedStrokes) {
+        // Hide options panel
+        this.hideEditOptions();
+        
+        // Find the image object to edit
+        const imageObj = draggedStrokes.find(stroke => stroke.type === 'image-object');
+        if (!imageObj) {
+            drawingManager.canvasManager.showToast('No image found to edit');
+            return;
+        }
+        
+        // Remove sketch strokes
+        const sketchStrokes = draggedStrokes.filter(stroke => stroke.type !== 'image-object');
+        sketchStrokes.forEach(stroke => {
+            const index = drawingManager.strokes.indexOf(stroke);
+            if (index > -1) {
+                drawingManager.strokes.splice(index, 1);
+            }
+        });
+        
+        // Set generating state
+        imageObj.isGenerating = true;
+        imageObj.currentFrame = 0;
+        drawingManager.redraw();
+        
+        // Start animation loop
+        const animateGeneration = () => {
+            if (imageObj.isGenerating) {
+                drawingManager.redraw();
+                requestAnimationFrame(animateGeneration);
+            }
+        };
+        animateGeneration();
+        
+        drawingManager.canvasManager.showToast(`Applying: ${selectedOption}...`);
+        
+        try {
+            // Convert image to blob for editing
+            const imageBlob = this.imageGenerator.base64ToBlob(imageObj.imageData);
+            
+            // Create enhanced prompt with selected option
+            const enhancedPrompt = `Apply this edit to the image: "${selectedOption}". The sketch lines were artistic guidance for this specific edit. Make the change while maintaining realistic, professional quality.`;
+            
+            await this.imageGenerator.editImage(
+                [imageBlob],
+                enhancedPrompt,
+                (partialBase64, frameIndex) => {
+                    // Not used for single image
+                },
+                (finalBase64) => {
+                    imageObj.imageData = finalBase64;
+                    imageObj.isGenerating = false;
+                    
+                    // Load the image to get its actual dimensions
+                    const img = new Image();
+                    img.onload = () => {
+                        // Calculate new dimensions maintaining aspect ratio
+                        const maxSize = 512;
+                        const aspectRatio = img.width / img.height;
+                        
+                        if (aspectRatio > 1) {
+                            // Landscape
+                            imageObj.width = maxSize;
+                            imageObj.height = maxSize / aspectRatio;
+                        } else {
+                            // Portrait or square
+                            imageObj.height = maxSize;
+                            imageObj.width = maxSize * aspectRatio;
+                        }
+                        
+                        drawingManager.undoManager.save();
+                        drawingManager.redraw();
+                        drawingManager.canvasManager.showToast('Image updated!');
+                    };
+                    img.src = `data:image/png;base64,${finalBase64}`;
+                }
+            );
+        } catch (error) {
+            console.error('Image update failed:', error);
+            imageObj.isGenerating = false;
+            drawingManager.redraw();
+            drawingManager.canvasManager.showToast('Image update failed');
+        }
+    }
 }
+
+export { AIGenerator };
